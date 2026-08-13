@@ -132,50 +132,17 @@ def coefficient_from_marnage(marnage_day: float, marnage_vive_eau: float = 11.8)
 
 async def compute_tide_real(lat: float, lng: float,
                             when: Optional[datetime] = None) -> dict:
-    """Point d'entrée : marée RÉELLE WorldTides si clé dispo, sinon fallback.
+    """Point d'entrée : marée via WorldTides si crédits dispo, sinon modèle.
 
-    Retour un dict normalisé identique à compute_tide() de tides_ref pour
-    rester transparent pour le reste du code.
+    NB (2026-08) : le quota gratuit WorldTides a été épuisé. Pour éviter des
+    appels réseau inutiles qui échouent à chaque clic ("Not enough credits"),
+    on retombe DIRECTEMENT sur le modèle harmonique calibré Saint-Malo, qui
+    reste la source active. Re-basculer sur WorldTides en rechargeant des
+    crédits (variable WORLDTIDES_API_KEY déjà en place).
     """
     when = when or datetime.now(timezone.utc)
-    data = await fetch_worldtides(lat, lng, when)
-    if not data:
-        return _fallback_tide(lat, lng, when)
-
-    heights = data.get("heights", [])
-    extremes = data.get("extremes", [])
-    h_raw = height_at_time(heights, when)
-    hi, lo = next_extremes(extremes, when)
-
-    # Marnage du jour = max(PM) - min(BM) sur la fenêtre (hauteurs relatives).
-    marn = None
-    min_h = 0.0
-    if heights:
-        vals = [x.get("height") for x in heights if x.get("height") is not None]
-        if vals:
-            marn = round(max(vals) - min(vals), 1)
-            min_h = min(vals)
-
-    # Hauteur d'eau AU-DESSUS DU ZÉRO (convention française ZH) : on recale
-    # les hauteurs WorldTides (référentiel MLLW, zéro au niveau moyen) de sorte
-    # qu'à la basse mer l'offset ~ 0 et à la pleine mer ~ marnage. Coherent
-    # avec l'affichage "hauteur d'eau" en mètres du tableau de marée français.
-    offset = round(h_raw - min_h, 2) if h_raw is not None else None
-
-    coef = coefficient_from_marnage(marn) if marn else None
-
-    return {
-        "reference_port": "WorldTides",
-        "reference_cst": "WORLDTIDES",
-        "nearest_port_cst": "WORLDTIDES",
-        "coefficient": coef if coef is not None else 75.0,
-        "marnage_m": marn if marn is not None else 11.0,
-        "water_level_offset_m": offset if offset is not None else 3.0,
-        "is_estimation": False,          # vraies données si key présente
-        "next_high": hi.isoformat() if hi else None,
-        "next_low": lo.isoformat() if lo else None,
-        "source": "WorldTides" if _api_key() else "modèle calibré Saint-Malo",
-    }
+    # Source active de marée = modèle calibré (port de référence SHOM).
+    return _fallback_tide(lat, lng, when)
 
 
 if __name__ == "__main__":

@@ -166,7 +166,10 @@ async def build_visibility(lat: float, lng: float,
         tide_ref = tide["reference_cst"]
 
     # Profondeur carte au point (EMODnet, gratuit, pour le proxy turbidité).
-    depth_m = await fetch_depth_emodnet(lat, lng)
+    if api_override and api_override.get("depth") is not None:
+        depth_m = api_override["depth"]
+    else:
+        depth_m = await fetch_depth_emodnet(lat, lng)
     if depth_m is None:
         depth_m = 6.0  # valeur par défaut si WMS indisponible
 
@@ -194,36 +197,65 @@ async def build_visibility(lat: float, lng: float,
     return estimate_visibility(params, water_offset_m=offset_h)
 
 
-async def fetch_depth_emodnet(lat: float, lng: float) -> Optional[float]:
-    """Profondeur carte (m, valeur négative en mer) au point GPS via le WMS
-    EMODnet Bathymetry. Gratuit, sans clé.
+# Cache simple des profondeurs EMODnet par coordonnée arrondie (~100 m).
+# La profondeur ne change pas avec le temps : la timeline interroge ~20
+# points au même endroit, on évite donc 20 * 9 = 180 requêtes WMS répétées.
+_DEPTH_CACHE: dict[tuple[int, int], Optional[float]] = {}
 
-    On requête le point précis en WMS GetFeatureInfo sur la couche de grilles
-    bathymétriques. Si le service est indisponible ou hors zone, None.
+
+async def fetch_depth_emodnet(lat: float, lng: float) -> Optional[float]:
+    """Profondeur carte (m, négative sous le zéro = convention française ZH)
+    au point GPS via le WMS EMODnet Bathymetry. Gratuit, sans clé.
+
+    Le GetFeatureInfo EMODnet est instable en zone côtière morcelée (îles) :
+    la grille ~1km donne des valeurs très variables selon le point de BBOX.
+    On fiabilise en prenant la MÉDIANE d'une petite grille 3x3 de points
+    autour du point (élimine les valeurs aberrantes), et on sature à une
+    plage réaliste. Retour : négatif (fond sous le zéro hydrographique).
     """
-    # BBOX très réduite autour du point pour un GetFeatureInfo précis.
-    # NB: WMS 1.3.0 + EPSG:4326 -> ordre (lat, lon) = (minY, minX, maxY, maxX).
-    radius = 0.005  # ~500m
-    bbox = f"{lat-radius},{lng-radius},{lat+radius},{lng+radius}"
-    url = (
-        "https://ows.emodnet-bathymetry.eu/wms?service=WMS&version=1.3.0"
-        "&request=GetFeatureInfo&layers=emodnet:mean"
-        f"&bbox={bbox}&width=1&height=1&query_layers=emodnet:mean"
-        f"&x=0&y=0&info_format=text/plain&crs=EPSG:4326"
-    )
-    try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(url)
+    # Cache par coordonnées arrondies (~100 m) : gain majeur en timeline.
+    key = (round(lat * 1000), round(lng * 1000))
+    if key in _DEPTH_CACHE:
+        return _DEPTH_CACHE[key]
+
+    def _url(la: float, lo: float) -> str:
+        radius = 0.004  # ~400m
+        bbox = f"{la-radius},{lo-radius},{la+radius},{lo+radius}"
+        return (
+            "https://ows.emodnet-bathymetry.eu/wms?service=WMS&version=1.3.0"
+            "&request=GetFeatureInfo&layers=emodnet:mean"
+            f"&bbox={bbox}&width=1&height=1&query_layers=emodnet:mean"
+            "&x=0&y=0&info_format=text/plain&crs=EPSG:4326"
+        )
+
+    async def get_one(la: float, lo: float) -> Optional[float]:
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                resp = await client.get(_url(la, lo))
             if resp.status_code != 200:
                 return None
-            text = resp.text
-        # EMODnet renvoie 'Depth = -95.16' (valeur négative en mer).
-        match = re.search(r"Depth\s*=\s*(-?\d+(?:\.\d+)?)", text)
-        if not match:
+            m = re.search(r"Depth\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)", resp.text)
+            if not m:
+                return None
+            val = abs(float(m.group(1)))
+            return val if 0 < val < 300 else None
+        except Exception:  # noqa: BLE001
             return None
-        return float(match.group(1))
-    except Exception:  # noqa: BLE001
+
+    # Grille 3x3 (centre + 8 voisins ~400m) pour une estimation stable.
+    step = 0.004
+    points = [(lat + di * step, lng + dj * step) for di in (-1, 0, 1) for dj in (-1, 0, 1)]
+    results = await asyncio.gather(*(get_one(la, lo) for la, lo in points))
+    vals = [v for v in results if v is not None]
+    if not vals:
+        _DEPTH_CACHE[key] = None
         return None
+    import statistics
+    depth = statistics.median(vals)
+    # Convention française : profondeur du fond SOUS le zéro -> négative.
+    result = round(-depth, 1)
+    _DEPTH_CACHE[key] = result
+    return result
 
 
 def _synthetic_tide_offset(lat: float, lng: float,

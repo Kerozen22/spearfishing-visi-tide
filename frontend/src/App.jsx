@@ -179,10 +179,10 @@ export default function App() {
             <div style={{ color: spotData.color_hex, fontWeight: 700 }}>
               {spotData.visi_qualitative}
             </div>
-            <div className="popup-line">Fond : {spotData.depth_chart_m.toFixed(1)} m</div>
+            <div className="popup-line">Fond : {Math.abs(spotData.depth_chart_m).toFixed(1)} m</div>
             <div className="popup-line">Marée (eau) : {spotData.water_level_offset_m.toFixed(2)} m</div>
             <div className="popup-line strong">
-              Profondeur réelle : {(spotData.depth_chart_m + spotData.water_level_offset_m).toFixed(1)} m
+              Profondeur réelle : {Math.max(0, (spotData.depth_chart_m + spotData.water_level_offset_m)).toFixed(1)} m
             </div>
             <small>Coef {spotData.tidal_coefficient} · à {fmtTime(spotData.at)}</small>
           </Popup>
@@ -207,7 +207,7 @@ export default function App() {
           <span className="muted">+24h · {waterOffset.toFixed(1)}m</span>
         </div>
         <div className="timeline-ref">
-          🌊 Hauteur d'eau estimée · réf. port Saint-Malo (SHOM)
+          🌊 Marée estimée par modèle · réf. port Saint-Malo (SHOM)
         </div>
       </div>
 
