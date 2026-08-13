@@ -1,0 +1,28 @@
+# Dépendances
+node_modules/
+.venv/
+__pycache__/
+*.egg-info/
+
+# Builds
+dist/
+dist-ssr/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+vercel/.env
+
+# OS / éditeur
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Vercel
+.vercel/
