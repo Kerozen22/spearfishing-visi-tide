@@ -18,13 +18,10 @@ body, #root, .app {
   backdrop-filter: blur(6px);
   box-shadow: 0 4px 20px rgba(0,0,0,.3);
 }
-.top-left { top: 14px; left: 14px; max-width: calc(100vw - 28px); }
 .top-right { top: 14px; right: 14px; display: flex; align-items: center; gap: 8px; }
 .bottom { bottom: 18px; left: 50%; transform: translateX(-50%); width: min(720px, 92vw); }
 
-/* Mobile (< 640px) : empile les HUD pour éviter que le sélecteur de fond ne
-   chevauche le panneau visi/marée en haut à droite. Le panneau météo passe
-   au bas, au-dessus du slider de marée ; le haut reste au sélecteur de carte. */
+/* Mobile : panneau visi/marée remonte au-dessus du slider de marée. */
 @media (max-width: 640px) {
   .top-right {
     top: auto;
@@ -35,13 +32,6 @@ body, #root, .app {
   .bottom {
     bottom: 14px;
   }
-  .bg-toggle {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .bg-toggle button {
-    white-space: nowrap;
-  }
 }
 
 .dot {
@@ -51,14 +41,6 @@ body, #root, .app {
 }
 .muted { color: #94a3b8; font-size: 12px; }
 .tide { color: #38bdf8; font-size: 13px; font-weight: 600; padding-left: 6px; border-left: 1px solid #475569; }
-
-select {
-  background: #1e293b;
-  color: #e2e8f0;
-  border: 1px solid #475569;
-  border-radius: 6px;
-  padding: 3px 8px;
-}
 
 .timeline-row {
   display: flex;
@@ -100,49 +82,6 @@ select {
 }
 .popup-line { font-size: 12px; margin-top: 4px; color: #cbd5e1; }
 .popup-line.strong { color: #7dd3fc; font-weight: 600; }
-.legend {
-  margin-top: 8px;
-  background: rgba(15, 23, 42, 0.85);
-  border: 1px solid #334155;
-  border-radius: 8px;
-  padding: 6px 10px;
-  font-size: 11px;
-  color: #cbd5e1;
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-  max-width: 260px;
-}
-.legend span {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border-radius: 3px;
-  margin-right: 3px;
-  vertical-align: middle;
-  border: 1px solid rgba(255,255,255,0.3);
-}
-.bg-toggle {
-  display: flex;
-  gap: 6px;
-}
-.bg-toggle button {
-  background: #1e293b;
-  color: #94a3b8;
-  border: 1px solid #475569;
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: all .15s;
-}
-.bg-toggle button.active {
-  background: #0ea5e9;
-  color: #04121f;
-  border-color: #0ea5e9;
-  font-weight: 600;
-}
 .map-fallback {
   position: absolute;
   inset: 0;

@@ -22,56 +22,24 @@ class MapBoundary extends Component {
   }
 }
 
-// Style "carte marine" : bathymétrie (profondeurs) + couche de symboles
-// nautiques OpenSeaMap (balises, bouées, mouillages, feux) par-dessus,
-// servies via nos proxies même-origine. C'est l'assemblage "carte marine".
-const MARINE_STYLE = {
-  version: 8,
-  glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
-  sources: {
-    bathy: {
-      type: 'raster',
-      tiles: [window.location.origin + '/v1/bathytile/{z}/{x}/{y}'],
-      tileSize: 256,
-      minzoom: 0,
-      maxzoom: 14,
-      attribution: 'Bathymétrie © EMODnet',
-    },
-    seamark: {
-      type: 'raster',
-      tiles: [window.location.origin + '/v1/seamark/{z}/{x}/{y}'],
-      tileSize: 256,
-      minzoom: 0,
-      maxzoom: 18,
-    },
-  },
-  layers: [
-    { id: 'bathy', type: 'raster', source: 'bathy' },
-    { id: 'seamark', type: 'raster', source: 'seamark' },
-  ],
-}
-
-// Style "SHOM" : bathymétrie (fond) + balisage OFFICIEL du SHOM par-dessus
-// (balises, bouées, feux). Servi via notre proxy même-origine /v1/shom/...
+// ---------------------------------------------------------------------------
+// Carte marine SHOM (unique fond de carte).
+// On assemble le fond de carte officiel du SHOM (FDC_GEBCO, trait de côte
+// épuré) + la toponymie marine (noms des lieux) + le balisage (balises,
+// bouées, feux). Le tout servit via notre proxy même-origine /v1/shom/...
 // qui envoie le Referer exigé par services.data.shom.fr.
+// ---------------------------------------------------------------------------
 const SHOM_STYLE = {
   version: 8,
   glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
   sources: {
-    bathy: {
+    shom_fond: {
       type: 'raster',
-      tiles: [window.location.origin + '/v1/bathytile/{z}/{x}/{y}'],
-      tileSize: 256,
-      minzoom: 0,
-      maxzoom: 14,
-      attribution: 'Bathymétrie © EMODnet',
-    },
-    shom_balisage: {
-      type: 'raster',
-      tiles: [window.location.origin + '/v1/shom/balisage/{z}/{x}/{y}'],
+      tiles: [window.location.origin + '/v1/shom/fond/{z}/{x}/{y}'],
       tileSize: 256,
       minzoom: 0,
       maxzoom: 18,
+      attribution: 'Fond © SHOM',
     },
     shom_toponymie: {
       type: 'raster',
@@ -80,46 +48,19 @@ const SHOM_STYLE = {
       minzoom: 0,
       maxzoom: 18,
     },
+    shom_balisage: {
+      type: 'raster',
+      tiles: [window.location.origin + '/v1/shom/balisage/{z}/{x}/{y}'],
+      tileSize: 256,
+      minzoom: 0,
+      maxzoom: 18,
+    },
   },
   layers: [
-    { id: 'bathy', type: 'raster', source: 'bathy' },
+    { id: 'shom_fond', type: 'raster', source: 'shom_fond' },
     { id: 'shom_toponymie', type: 'raster', source: 'shom_toponymie' },
     { id: 'shom_balisage', type: 'raster', source: 'shom_balisage' },
   ],
-}
-
-// Style "relief" : bathymétrie seule (profondeurs colorées).
-const BATHY_STYLE = {
-  version: 8,
-  glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
-  sources: {
-    bathy: {
-      type: 'raster',
-      tiles: [window.location.origin + '/v1/bathytile/{z}/{x}/{y}'],
-      tileSize: 256,
-      minzoom: 0,
-      maxzoom: 14,
-      attribution: 'Bathymétrie © EMODnet',
-    },
-  },
-  layers: [
-    { id: 'bathy', type: 'raster', source: 'bathy' },
-  ],
-}
-
-// Style "carte routière" : tuiles OSM classiques.
-const OSM_STYLE = {
-  version: 8,
-  glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
-  sources: {
-    osm: {
-      type: 'raster',
-      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-      tileSize: 256,
-      attribution: '© OpenStreetMap',
-    },
-  },
-  layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
 }
 
 function visiColor(score) {
@@ -140,11 +81,7 @@ export default function App() {
   const [sliderIdx, setSliderIdx] = useState(null)
   const [error, setError] = useState(null)
   const [baseline] = useState({ lat: 48.99, lng: -4.52 })
-  const [bgMode, setBgMode] = useState('marine')  // marine | bathy | osm | shom
   const mapRef = useRef(null)
-
-  // Bascule de fond via mapStyle natif react-map-gl (fiable) : on change le
-  // style complet plutot que de jouer sur la visibilité des couches à la volée.
 
   // Charge la timeline 24h (marée + visi par heure) pour le slider
   useEffect(() => {
@@ -187,16 +124,12 @@ export default function App() {
   const displayLabel = currentPoint ? fmtTime(currentPoint.at) : '—'
   const displayVisi = currentPoint ? currentPoint.visi_m : null
 
-  // Au chargement de la Map, force un repaint + recharge de la source bathy
-  // pour fiabiliser l'affichage des tuiles raster (évite l'écran blanc
-  // intermittent où les tuiles sont chargées mais non peintes).
+  // Au chargement de la Map, force un repaint + recharge de la source SHOM
+  // pour fiabiliser l'affichage des tuiles raster (écran blanc intermittent).
   const onMapLoad = () => {
     try {
       const m = mapRef.current
       if (!m) return
-      if (bgMode !== 'osm' && m.getSource('bathy')) {
-        m.getSource('bathy').reload?.()
-      }
       m.triggerRepaint?.()
     } catch (e) { console.error('onMapLoad:', e) }
   }
@@ -210,11 +143,7 @@ export default function App() {
         onLoad={onMapLoad}
         onMove={(e) => setViewport(e.viewState)}
         style={{ width: '100%', height: '100vh' }}
-        mapStyle={
-          bgMode === 'marine' ? MARINE_STYLE :
-          bgMode === 'bathy' ? BATHY_STYLE :
-          bgMode === 'shom' ? SHOM_STYLE : OSM_STYLE
-        }
+        mapStyle={SHOM_STYLE}
         mapLib={maplibregl}
         onClick={onMapClick}
       >
@@ -237,31 +166,6 @@ export default function App() {
         )}
       </Map>
       </MapBoundary>
-
-      <div className="hud top-left">
-        <div className="bg-toggle">
-          <button className={bgMode === 'shom' ? 'active' : ''} onClick={() => setBgMode('shom')}>
-            🗺️ SHOM
-          </button>
-          <button className={bgMode === 'marine' ? 'active' : ''} onClick={() => setBgMode('marine')}>
-            🧭 Carte marine
-          </button>
-          <button className={bgMode === 'bathy' ? 'active' : ''} onClick={() => setBgMode('bathy')}>
-            🌊 Relief
-          </button>
-          <button className={bgMode === 'osm' ? 'active' : ''} onClick={() => setBgMode('osm')}>
-            🚗 Carte routière
-          </button>
-        </div>
-        {(bgMode === 'marine' || bgMode === 'bathy' || bgMode === 'shom') && (
-          <div className="legend">
-            <span style={{ background: '#ffd700' }} /> 0–5m
-            <span style={{ background: '#2e8b57' }} /> –20m
-            <span style={{ background: '#1e90ff' }} /> –60m
-            <span style={{ background: '#1a1a8a' }} /> &gt;–100m
-          </div>
-        )}
-      </div>
 
       <div className="hud top-right">
         <span className="dot" style={{ background: visiColor(displayVisi ?? 0) }} />
