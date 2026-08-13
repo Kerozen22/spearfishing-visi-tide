@@ -24,10 +24,13 @@ class MapBoundary extends Component {
 
 // ---------------------------------------------------------------------------
 // Carte marine SHOM (unique fond de carte).
-// On assemble le fond de carte officiel du SHOM (FDC_GEBCO, trait de côte
-// épuré) + la toponymie marine (noms des lieux) + le balisage (balises,
-// bouées, feux). Le tout servit via notre proxy même-origine /v1/shom/...
-// qui envoie le Referer exigé par services.data.shom.fr.
+// Assemblage façon data.shom.fr :
+//   1) Fond de carte mondial FDC_GEBCO (couverture de base)
+//   2) RASTER_MARINE : les vraies cartes marines officielles (sondes,
+//      isobathes, reliefs, noms) là où elles existent
+//   3) Toponymie marine (noms des lieux) + balisage (balises, bouées, feux)
+// Le tout servit via notre proxy même-origine /v1/shom/... qui envoie le
+// Referer exigé par services.data.shom.fr.
 // ---------------------------------------------------------------------------
 const SHOM_STYLE = {
   version: 8,
@@ -40,6 +43,13 @@ const SHOM_STYLE = {
       minzoom: 0,
       maxzoom: 18,
       attribution: 'Fond © SHOM',
+    },
+    shom_marines: {
+      type: 'raster',
+      tiles: [window.location.origin + '/v1/shom/rastermarine/{z}/{x}/{y}'],
+      tileSize: 256,
+      minzoom: 0,
+      maxzoom: 18,
     },
     shom_toponymie: {
       type: 'raster',
@@ -58,6 +68,7 @@ const SHOM_STYLE = {
   },
   layers: [
     { id: 'shom_fond', type: 'raster', source: 'shom_fond' },
+    { id: 'shom_marines', type: 'raster', source: 'shom_marines' },
     { id: 'shom_toponymie', type: 'raster', source: 'shom_toponymie' },
     { id: 'shom_balisage', type: 'raster', source: 'shom_balisage' },
   ],

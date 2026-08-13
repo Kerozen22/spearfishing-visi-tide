@@ -137,9 +137,10 @@ _SHOM_REFERER = "https://data.shom.fr/"
 # On ne garde que les couches librement consultables. L'identifiant exact est
 # utilisé tel quel (certains comportent un tiret, ex. FDC_GEBCO_PYR-PNG_3857_WMTS).
 _SHOM_LAYERS = {
-    "fond": "FDC_GEBCO_PYR-PNG_3857_WMTS",
+    "rastermarine": "RASTER_MARINE_3857_WMTS",
     "balisage": "BALISAGE_PYR_PNG_3857_WMTS",
     "toponymie": "TOPONYMIE_PYR_PNG_3857_WMTS",
+    "fond": "FDC_GEBCO_PYR-PNG_3857_WMTS",
     "batim": "BATHYELLI_ZH_PYR_PNG_3857_WMTS",
 }
 
