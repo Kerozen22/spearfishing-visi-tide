@@ -184,9 +184,11 @@ def compute_tide(lat: float, lng: float,
     when = when or datetime.now(timezone.utc)
     port = resolve_reference_port(lat, lng)
     ref = port.get("ref") or "SAINT-MALO"
-    coef = _coefficient_of_day(when)
-    marn = _marnage_from_coef(ref, coef)
+    # Coefficient harmonique SHOM calibré (vrai coeff quotidien, pas approx).
+    from .tide_coeff import tidal_range_harmonic, coefficient_from_range
+    coef = coefficient_from_range(tidal_range_harmonic(when))
     warp = tide_height_at(ref, coef, when)
+    marn = _marnage_from_coef(ref, coef)
     return {
         "reference_port": port.get("top", "Saint-Malo"),
         "reference_cst": ref,
@@ -197,7 +199,7 @@ def compute_tide(lat: float, lng: float,
         "is_estimation": True,      # pas les valeurs officielles temps réel
         "next_high": None,          # rempli par le dispo réel si présent
         "next_low": None,
-        "source": "modèle calibré Saint-Malo",
+        "source": "harmonique (M2+S2) calibré Saint-Malo",
     }
 
 
