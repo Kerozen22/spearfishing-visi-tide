@@ -1,19 +1,41 @@
-import { useEffect, useRef, useState } from 'react'
+import React, { Component, useEffect, useRef, useState } from 'react'
 import Map, { Marker, Popup } from 'react-map-gl'
 import maplibregl from 'maplibre-gl'
 import { fmtTime, fmtDate } from './lib/geo.js'
 
+// Garde-fou : si la carte (MapLibre/WebGL) crash sur un appareil, on évite
+// l'écran blanc : on affiche un fond neutre + message, le reste de l'UI reste.
+class MapBoundary extends Component {
+  constructor(props) { super(props); this.state = { err: null } }
+  static getDerivedStateFromError(e) { return { err: e } }
+  componentDidCatch(e) { console.error('MapBoundary:', e) }
+  render() {
+    if (this.state.err) {
+      return (
+        <div className="map-fallback">
+          <p>⚠️ La carte n'a pas pu s'afficher sur cet appareil (WebGL indisponible).</p>
+          <p className="muted">Les données de marée et de visibilité restent disponibles ci-dessous.</p>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 // Style "bathymétrie" : relief des fonds marins EMODnet en couleurs de
 // profondeur. Les tuiles passent par notre proxy /v1/bathytile/{z}/{x}/{y}
 // (même origine) : court-circuite les soucis de CORS et de cache navigateur
-// du serveur EMODnet direct.
+// du serveur EMODnet direct. URL absolue (origine runtime) pour éviter toute
+// ambiguïté de chemin relatif dans le chargement MapLibre.
 const BATHY_STYLE = {
   version: 8,
   glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
   sources: {
     bathy: {
       type: 'raster',
-      tiles: ['/v1/bathytile/{z}/{x}/{y}'],
+      tiles: [
+        window.location.origin + '/v1/bathytile/{z}/{x}/{y}',
+      ],
       tileSize: 256,
       minzoom: 0,
       maxzoom: 14,
@@ -105,11 +127,27 @@ export default function App() {
   const displayLabel = currentPoint ? fmtTime(currentPoint.at) : '—'
   const displayVisi = currentPoint ? currentPoint.visi_m : null
 
+  // Au chargement de la Map, force un repaint + recharge de la source bathy
+  // pour fiabiliser l'affichage des tuiles raster (évite l'écran blanc
+  // intermittent où les tuiles sont chargées mais non peintes).
+  const onMapLoad = () => {
+    try {
+      const m = mapRef.current
+      if (!m) return
+      if (showBathy && m.getSource('bathy')) {
+        m.getSource('bathy').reload?.()
+      }
+      m.triggerRepaint?.()
+    } catch (e) { console.error('onMapLoad:', e) }
+  }
+
   return (
     <div className="app">
+      <MapBoundary>
       <Map
         {...viewport}
         ref={mapRef}
+        onLoad={onMapLoad}
         onMove={(e) => setViewport(e.viewState)}
         style={{ width: '100%', height: '100vh' }}
         mapStyle={showBathy ? BATHY_STYLE : OSM_STYLE}
@@ -134,6 +172,7 @@ export default function App() {
           </Popup>
         )}
       </Map>
+      </MapBoundary>
 
       <div className="hud top-left">
         <div className="bg-toggle">
