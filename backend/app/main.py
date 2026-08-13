@@ -90,6 +90,31 @@ async def bathytile(z: int, x: int, y: int):
     )
 
 
+# ---------------------------------------------------------------------------
+# Proxy de tuiles "carte marine" OpenSeaMap (symboles nautiques : balises,
+# bouées, mouillages, feux...). Transparentes, à superposer sur le fond
+# bathymétrique. Même origine pour éviter CORS/cache navigateur.
+# ---------------------------------------------------------------------------
+_SEAMARK_TILE = "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png"
+
+
+@app.get("/v1/seamark/{z}/{x}/{y}")
+async def seamark(z: int, x: int, y: int):
+    url = _SEAMARK_TILE.format(z=z, x=x, y=y)
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(url)
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"Erreur proxy OpenSeaMap : {e!r}")
+    if r.status_code != 200:
+        raise HTTPException(r.status_code, "Tuile indisponible sur OpenSeaMap")
+    return Response(
+        content=r.content,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},  # 24h
+    )
+
+
 @app.get("/v1/spot", response_model=SpotInfo)
 async def spot(
     lat: float = Query(..., ge=-90, le=90, description="Latitude"),

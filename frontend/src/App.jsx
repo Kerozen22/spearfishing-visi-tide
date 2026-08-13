@@ -22,20 +22,43 @@ class MapBoundary extends Component {
   }
 }
 
-// Style "bathymétrie" : relief des fonds marins EMODnet en couleurs de
-// profondeur. Les tuiles passent par notre proxy /v1/bathytile/{z}/{x}/{y}
-// (même origine) : court-circuite les soucis de CORS et de cache navigateur
-// du serveur EMODnet direct. URL absolue (origine runtime) pour éviter toute
-// ambiguïté de chemin relatif dans le chargement MapLibre.
+// Style "carte marine" : bathymétrie (profondeurs) + couche de symboles
+// nautiques OpenSeaMap (balises, bouées, mouillages, feux) par-dessus,
+// servies via nos proxies même-origine. C'est l'assemblage "carte marine".
+const MARINE_STYLE = {
+  version: 8,
+  glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+  sources: {
+    bathy: {
+      type: 'raster',
+      tiles: [window.location.origin + '/v1/bathytile/{z}/{x}/{y}'],
+      tileSize: 256,
+      minzoom: 0,
+      maxzoom: 14,
+      attribution: 'Bathymétrie © EMODnet',
+    },
+    seamark: {
+      type: 'raster',
+      tiles: [window.location.origin + '/v1/seamark/{z}/{x}/{y}'],
+      tileSize: 256,
+      minzoom: 0,
+      maxzoom: 18,
+    },
+  },
+  layers: [
+    { id: 'bathy', type: 'raster', source: 'bathy' },
+    { id: 'seamark', type: 'raster', source: 'seamark' },
+  ],
+}
+
+// Style "relief" : bathymétrie seule (profondeurs colorées).
 const BATHY_STYLE = {
   version: 8,
   glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
   sources: {
     bathy: {
       type: 'raster',
-      tiles: [
-        window.location.origin + '/v1/bathytile/{z}/{x}/{y}',
-      ],
+      tiles: [window.location.origin + '/v1/bathytile/{z}/{x}/{y}'],
       tileSize: 256,
       minzoom: 0,
       maxzoom: 14,
@@ -80,7 +103,7 @@ export default function App() {
   const [sliderIdx, setSliderIdx] = useState(null)
   const [error, setError] = useState(null)
   const [baseline] = useState({ lat: 48.99, lng: -4.52 })
-  const [showBathy, setShowBathy] = useState(true)  // fond bathymétrie par défaut
+  const [bgMode, setBgMode] = useState('marine')  // marine | bathy | osm
   const mapRef = useRef(null)
 
   // Bascule de fond via mapStyle natif react-map-gl (fiable) : on change le
@@ -134,7 +157,7 @@ export default function App() {
     try {
       const m = mapRef.current
       if (!m) return
-      if (showBathy && m.getSource('bathy')) {
+      if (bgMode !== 'osm' && m.getSource('bathy')) {
         m.getSource('bathy').reload?.()
       }
       m.triggerRepaint?.()
@@ -150,7 +173,10 @@ export default function App() {
         onLoad={onMapLoad}
         onMove={(e) => setViewport(e.viewState)}
         style={{ width: '100%', height: '100vh' }}
-        mapStyle={showBathy ? BATHY_STYLE : OSM_STYLE}
+        mapStyle={
+          bgMode === 'marine' ? MARINE_STYLE :
+          bgMode === 'bathy' ? BATHY_STYLE : OSM_STYLE
+        }
         mapLib={maplibregl}
         onClick={onMapClick}
       >
@@ -176,14 +202,17 @@ export default function App() {
 
       <div className="hud top-left">
         <div className="bg-toggle">
-          <button className={showBathy ? 'active' : ''} onClick={() => setShowBathy(true)}>
-            🌊 Relief + profondeurs
+          <button className={bgMode === 'marine' ? 'active' : ''} onClick={() => setBgMode('marine')}>
+            🧭 Carte marine
           </button>
-          <button className={!showBathy ? 'active' : ''} onClick={() => setShowBathy(false)}>
+          <button className={bgMode === 'bathy' ? 'active' : ''} onClick={() => setBgMode('bathy')}>
+            🌊 Relief
+          </button>
+          <button className={bgMode === 'osm' ? 'active' : ''} onClick={() => setBgMode('osm')}>
             🗺️ Carte routière
           </button>
         </div>
-        {showBathy && (
+        {(bgMode === 'marine' || bgMode === 'bathy') && (
           <div className="legend">
             <span style={{ background: '#ffd700' }} /> 0–5m
             <span style={{ background: '#2e8b57' }} /> –20m
