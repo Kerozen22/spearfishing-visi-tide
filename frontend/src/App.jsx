@@ -223,12 +223,14 @@ export default function App() {
       </Map>
       </MapBoundary>
 
-      <div className="hud top-right">
-        <span className="dot" style={{ background: visiColor(displayVisi ?? 0) }} />
-        <strong>{displayVisi != null ? displayVisi.toFixed(1) : '--'} m</strong>
-        <span className="muted">à {displayLabel}</span>
-        <span className="tide">🌊 {waterOffset.toFixed(1)} m</span>
-      </div>
+      {selected && popupView && (
+        <div className="hud top-right">
+          <span className="dot" style={{ background: visiColor(displayVisi ?? 0) }} />
+          <strong>{displayVisi != null ? displayVisi.toFixed(1) : '--'} m</strong>
+          <span className="muted">à {displayLabel}</span>
+          <span className="tide">🌊 {waterOffset.toFixed(1)} m</span>
+        </div>
+      )}
 
       {/* Fiche spot en bas : infos + sélecteur de jour + slider 24h */}
       {selected && popupView && (
