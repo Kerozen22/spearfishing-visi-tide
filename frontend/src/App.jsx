@@ -73,9 +73,9 @@ const SHOM_STYLE = {
       minzoom: 0,
       maxzoom: 18,
     },
-    shom_epaves: {
+    shom_toponymie: {
       type: 'raster',
-      tiles: [window.location.origin + '/v1/shom/epaves/{z}/{x}/{y}'],
+      tiles: [window.location.origin + '/v1/shom/toponymie/{z}/{x}/{y}'],
       tileSize: 256,
       minzoom: 0,
       maxzoom: 18,
@@ -83,7 +83,7 @@ const SHOM_STYLE = {
   },
   layers: [
     { id: 'bathy', type: 'raster', source: 'bathy' },
-    { id: 'shom_epaves', type: 'raster', source: 'shom_epaves' },
+    { id: 'shom_toponymie', type: 'raster', source: 'shom_toponymie' },
     { id: 'shom_balisage', type: 'raster', source: 'shom_balisage' },
   ],
 }

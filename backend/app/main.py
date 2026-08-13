@@ -133,9 +133,11 @@ _SHOM_TILE = (
 )
 _SHOM_REFERER = "https://data.shom.fr/"
 # Couches SHOM accessibles via ce proxy (identifiant WMTS -> nom de couche).
+# Attention : certaines couches déclarées (ex. épaves) répondent 401 "No rights".
+# On ne garde que les couches librement consultables.
 _SHOM_LAYERS = {
     "balisage": "BALISAGE_PYR_PNG_3857_WMTS",
-    "epaves": "EPAVES_PYR",
+    "toponymie": "TOPONYMIE_PYR_PNG_3857_WMTS",
     "batim": "BATHYELLI_ZH_PYR_PNG_3857_WMTS",
 }
 
