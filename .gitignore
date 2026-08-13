@@ -4,10 +4,11 @@ node_modules/
 __pycache__/
 *.egg-info/
 
-# Builds
-dist/
-dist-ssr/
-public/
+# Builds — SERVIS PAR FASTAPI (committé pour fiabilité Vercel)
+# On versionne dist/ pour que la fonction serverless le trouve toujours.
+# dist/
+# dist-ssr/
+# public/
 
 # Logs
 *.log

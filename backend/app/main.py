@@ -175,11 +175,19 @@ def _next_extremes(lat: float, lng: float, when: datetime) -> tuple[datetime, da
 
 
 # ---------------------------------------------------------------------------
-# Frontend buildé (SPA) : sert public/index.html à la racine + assets statiques.
-# En déploiement Vercel, le build front sort dans /public (doc Vercel/static).
-# En dev local (uvicorn seul), /public peut ne pas exister -> on ignore.
+# Frontend buildé (SPA) : sert index.html de dist/ à la racine + assets.
+# Le front est *versionné* dans /dist (committé) pour être garanti présent
+# dans le runtime de la fonction serverless Vercel. En dev local (uvicorn
+# seul), dist/ peut ne pas exister -> on ignore.
 # ---------------------------------------------------------------------------
-_public_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "public")
+_public_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "dist")
+# Résolution robuste du répertoire de travail selon l'hébergement (Vercel).
+_candidates = [
+    _public_dir,
+    os.path.join(os.getcwd(), "dist"),
+    os.path.join(os.getcwd(), "dist_web"),
+]
+_public_dir = next((p for p in _candidates if os.path.isdir(p)), _public_dir)
 _index_html = os.path.join(_public_dir, "index.html")
 
 if os.path.isdir(_public_dir) and os.path.isfile(_index_html):
