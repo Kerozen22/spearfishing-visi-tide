@@ -51,6 +51,43 @@ const MARINE_STYLE = {
   ],
 }
 
+// Style "SHOM" : bathymétrie (fond) + balisage OFFICIEL du SHOM par-dessus
+// (balises, bouées, feux). Servi via notre proxy même-origine /v1/shom/...
+// qui envoie le Referer exigé par services.data.shom.fr.
+const SHOM_STYLE = {
+  version: 8,
+  glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+  sources: {
+    bathy: {
+      type: 'raster',
+      tiles: [window.location.origin + '/v1/bathytile/{z}/{x}/{y}'],
+      tileSize: 256,
+      minzoom: 0,
+      maxzoom: 14,
+      attribution: 'Bathymétrie © EMODnet',
+    },
+    shom_balisage: {
+      type: 'raster',
+      tiles: [window.location.origin + '/v1/shom/balisage/{z}/{x}/{y}'],
+      tileSize: 256,
+      minzoom: 0,
+      maxzoom: 18,
+    },
+    shom_epaves: {
+      type: 'raster',
+      tiles: [window.location.origin + '/v1/shom/epaves/{z}/{x}/{y}'],
+      tileSize: 256,
+      minzoom: 0,
+      maxzoom: 18,
+    },
+  },
+  layers: [
+    { id: 'bathy', type: 'raster', source: 'bathy' },
+    { id: 'shom_epaves', type: 'raster', source: 'shom_epaves' },
+    { id: 'shom_balisage', type: 'raster', source: 'shom_balisage' },
+  ],
+}
+
 // Style "relief" : bathymétrie seule (profondeurs colorées).
 const BATHY_STYLE = {
   version: 8,
@@ -103,7 +140,7 @@ export default function App() {
   const [sliderIdx, setSliderIdx] = useState(null)
   const [error, setError] = useState(null)
   const [baseline] = useState({ lat: 48.99, lng: -4.52 })
-  const [bgMode, setBgMode] = useState('marine')  // marine | bathy | osm
+  const [bgMode, setBgMode] = useState('marine')  // marine | bathy | osm | shom
   const mapRef = useRef(null)
 
   // Bascule de fond via mapStyle natif react-map-gl (fiable) : on change le
@@ -175,7 +212,8 @@ export default function App() {
         style={{ width: '100%', height: '100vh' }}
         mapStyle={
           bgMode === 'marine' ? MARINE_STYLE :
-          bgMode === 'bathy' ? BATHY_STYLE : OSM_STYLE
+          bgMode === 'bathy' ? BATHY_STYLE :
+          bgMode === 'shom' ? SHOM_STYLE : OSM_STYLE
         }
         mapLib={maplibregl}
         onClick={onMapClick}
@@ -202,6 +240,9 @@ export default function App() {
 
       <div className="hud top-left">
         <div className="bg-toggle">
+          <button className={bgMode === 'shom' ? 'active' : ''} onClick={() => setBgMode('shom')}>
+            🗺️ SHOM
+          </button>
           <button className={bgMode === 'marine' ? 'active' : ''} onClick={() => setBgMode('marine')}>
             🧭 Carte marine
           </button>
@@ -209,10 +250,10 @@ export default function App() {
             🌊 Relief
           </button>
           <button className={bgMode === 'osm' ? 'active' : ''} onClick={() => setBgMode('osm')}>
-            🗺️ Carte routière
+            🚗 Carte routière
           </button>
         </div>
-        {(bgMode === 'marine' || bgMode === 'bathy') && (
+        {(bgMode === 'marine' || bgMode === 'bathy' || bgMode === 'shom') && (
           <div className="legend">
             <span style={{ background: '#ffd700' }} /> 0–5m
             <span style={{ background: '#2e8b57' }} /> –20m

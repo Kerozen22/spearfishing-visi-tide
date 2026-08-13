@@ -115,6 +115,54 @@ async def seamark(z: int, x: int, y: int):
     )
 
 
+# ---------------------------------------------------------------------------
+# Proxy de tuiles SHOM (services.data.shom.fr). Ce service vérifie le header
+# HTTP "Referer" : sans lui, il répond 401 "Wrong referer". Notre backend envoie
+# donc systématiquement un Referer data.shom.fr lors de la récupération, puis
+# sert la tuile en même-origine (aucun CORS/cache navigateur côté app).
+# Couches réellement utiles (officielles) :
+#   BALISAGE_PYR_PNG_3857_WMTS  -> balises, bouées, feux (superposable)
+#   EPAVES_PYR                  -> épaves
+# ---------------------------------------------------------------------------
+_SHOM_TILE = (
+    "https://services.data.shom.fr/clevisu/wmts"
+    "?layer={layer}{suffix}"
+    "&style=normal&tilematrixset=3857"
+    "&Service=WMTS&Request=GetTile&Version=1.0.0&Format=image%2Fpng"
+    "&TileMatrix={z}&TileCol={x}&TileRow={y}"
+)
+_SHOM_REFERER = "https://data.shom.fr/"
+# Couches SHOM accessibles via ce proxy (identifiant WMTS -> nom de couche).
+_SHOM_LAYERS = {
+    "balisage": "BALISAGE_PYR_PNG_3857_WMTS",
+    "epaves": "EPAVES_PYR",
+    "batim": "BATHYELLI_ZH_PYR_PNG_3857_WMTS",
+}
+
+
+@app.get("/v1/shom/{layer}/{z}/{x}/{y}")
+async def shom_tile(layer: str, z: int, x: int, y: int):
+    l = _SHOM_LAYERS.get(layer)
+    if l is None:
+        raise HTTPException(404, f"Couche SHOM inconnue : {layer}")
+    # Les identifiants SHOM peuvent contenir un tiret (ex: ..._PYR-PNG_3857_WMTS)
+    # via le {suffix} ; les couches simples n'ont pas de suffixe.
+    suffix = ""
+    url = _SHOM_TILE.format(layer=l, suffix=suffix, z=z, x=x, y=y)
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(url, headers={"Referer": _SHOM_REFERER})
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"Erreur proxy SHOM : {e!r}")
+    if r.status_code != 200:
+        raise HTTPException(r.status_code, "Tuile indisponible sur le SHOM")
+    return Response(
+        content=r.content,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 @app.get("/v1/spot", response_model=SpotInfo)
 async def spot(
     lat: float = Query(..., ge=-90, le=90, description="Latitude"),
