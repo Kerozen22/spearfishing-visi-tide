@@ -18,9 +18,31 @@ body, #root, .app {
   backdrop-filter: blur(6px);
   box-shadow: 0 4px 20px rgba(0,0,0,.3);
 }
-.top-left { top: 14px; left: 14px; }
+.top-left { top: 14px; left: 14px; max-width: calc(100vw - 28px); }
 .top-right { top: 14px; right: 14px; display: flex; align-items: center; gap: 8px; }
 .bottom { bottom: 18px; left: 50%; transform: translateX(-50%); width: min(720px, 92vw); }
+
+/* Mobile (< 640px) : empile les HUD pour éviter que le sélecteur de fond ne
+   chevauche le panneau visi/marée en haut à droite. Le panneau météo passe
+   au bas, au-dessus du slider de marée ; le haut reste au sélecteur de carte. */
+@media (max-width: 640px) {
+  .top-right {
+    top: auto;
+    bottom: 84px;
+    right: 50%;
+    transform: translateX(50%);
+  }
+  .bottom {
+    bottom: 14px;
+  }
+  .bg-toggle {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .bg-toggle button {
+    white-space: nowrap;
+  }
+}
 
 .dot {
   width: 14px; height: 14px; border-radius: 50%;
