@@ -116,6 +116,17 @@ body, #root, .app {
 .stat { flex: 1; display: flex; flex-direction: column; }
 .stat-value { font-size: 16px; font-weight: 700; color: #e2e8f0; }
 .stat-label { font-size: 11px; color: #94a3b8; margin-top: 2px; text-transform: uppercase; letter-spacing: .3px; }
+.sheet-extremes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  border-top: 1px solid #1e293b;
+  padding: 8px 0;
+  font-size: 12px;
+}
+.extreme { font-weight: 600; }
+.extreme-pm { color: #38bdf8; }
+.extreme-bm { color: #94a3b8; }
 .sheet-slider {
   display: flex;
   align-items: center;

@@ -238,8 +238,33 @@ async def timeline(
             "tidal_coefficient": r.tidal_coefficient,
             "factors": r.factors,
         })
+    # Extrema (PM/BM) du jour : on détecte les pics/creux de la hauteur d'eau
+    # sur la courbe du timeline pour afficher les pleines/basses mers.
+    extremes = _detect_extremes(points)
     return {"lat": lat, "lng": lng, "start": when.isoformat(),
-            "step_minutes": step, "points": points}
+            "step_minutes": step, "points": points, "extremes": extremes}
+
+
+def _detect_extremes(points: list[dict]) -> list[dict]:
+    """Détecte les pleines mers (hautes) et basses mers (basses) dans une
+    courbe de marée échantillonnée régulièrement (points). Retourne une liste
+    de {at, type: 'PM'|'BM', height_m} triée par heure.
+    """
+    out = []
+    n = len(points)
+    for i in range(n):
+        prev = points[i - 1]["water_level_offset_m"] if i > 0 else None
+        nxt = points[i + 1]["water_level_offset_m"] if i + 1 < n else None
+        v = points[i]["water_level_offset_m"]
+        is_peak = prev is not None and nxt is not None and v > prev and v >= nxt
+        is_trough = prev is not None and nxt is not None and v < prev and v <= nxt
+        if is_peak or is_trough:
+            out.append({
+                "at": points[i]["at"],
+                "type": "PM" if is_peak else "BM",
+                "height_m": round(v, 1),
+            })
+    return out
 
 
 # ---------------------------------------------------------------------------

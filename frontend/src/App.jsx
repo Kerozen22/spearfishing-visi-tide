@@ -89,6 +89,7 @@ export default function App() {
   const [spotData, setSpotData] = useState(null)   // fiche du spot (fond fixe)
   const [loading, setLoading] = useState(false)
   const [timeline, setTimeline] = useState([])     // points 24h du jour choisi
+  const [extremes, setExtremes] = useState([])     // PM/BM du jour choisi
   const [sliderIdx, setSliderIdx] = useState(null)
   const [dayOffset, setDayOffset] = useState(0)    // 0=aujourd'hui, -1=hier, +1=demain
   const [error, setError] = useState(null)
@@ -121,6 +122,7 @@ export default function App() {
         const data = await res.json()
         if (!mounted) return
         setTimeline(data.points || [])
+        setExtremes(data.extremes || [])
         // Sélectionne l'heure courante si on est sur aujourd'hui, sinon début de jour
         const now = Date.now()
         const curIdx = (data.points || []).findIndex((p) => {
@@ -250,7 +252,7 @@ export default function App() {
               <button className="day-btn" onClick={() => setDayOffset((d) => d + 1)}
                       aria-label="Jour suivant">▶</button>
             </div>
-            <button className="sheet-close" onClick={() => { setSelected(null); setSpotData(null) }}
+            <button className="sheet-close" onClick={() => { setSelected(null); setSpotData(null); setExtremes([]) }}
                     aria-label="Fermer">✕</button>
           </div>
 
@@ -281,6 +283,17 @@ export default function App() {
               <span className="stat-label">Coef</span>
             </div>
           </div>
+
+          {/* Pleines / basses mers du jour choisi */}
+          {extremes.length > 0 && (
+            <div className="sheet-extremes">
+              {extremes.map((e) => (
+                <span key={e.at} className={`extreme extreme-${e.type === 'PM' ? 'pm' : 'bm'}`}>
+                  {e.type} {fmtTime(e.at)} · {e.height_m}m
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Slider temporel 24h du jour choisi */}
           {timeline.length > 1 && (
