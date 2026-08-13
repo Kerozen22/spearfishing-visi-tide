@@ -12,11 +12,14 @@ Lancement :
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .tide_plus import build_visibility, _infer_tidal_coefficient, _synthetic_tide_offset
@@ -169,6 +172,33 @@ def _next_extremes(lat: float, lng: float, when: datetime) -> tuple[datetime, da
     high = high or (when + timedelta(hours=6))
     low = low or (when + timedelta(hours=6))
     return high, low
+
+
+# ---------------------------------------------------------------------------
+# Frontend buildé (SPA) : sert public/index.html à la racine + assets statiques.
+# En déploiement Vercel, le build front sort dans /public (doc Vercel/static).
+# En dev local (uvicorn seul), /public peut ne pas exister -> on ignore.
+# ---------------------------------------------------------------------------
+_public_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "public")
+_index_html = os.path.join(_public_dir, "index.html")
+
+if os.path.isdir(_public_dir) and os.path.isfile(_index_html):
+    app.mount("/assets", StaticFiles(directory=os.path.join(_public_dir, "assets")), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    async def index():
+        return FileResponse(_index_html)
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        # Fallback SPA : tout chemin non-API renvoie l'index (routing client).
+        # NB: déclaré APRÈS les routes /v1, /health -> Vercel ne les capte pas.
+        candidate = os.path.join(_public_dir, full_path)
+        if full_path and os.path.isfile(candidate):
+            return FileResponse(candidate)
+        if full_path.startswith("v1/") or full_path == "health":
+            raise HTTPException(404)
+        return FileResponse(_index_html)
 
 
 if __name__ == "__main__":
