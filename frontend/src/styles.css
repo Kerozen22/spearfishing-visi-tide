@@ -78,3 +78,46 @@ select {
 }
 .popup-line { font-size: 12px; margin-top: 4px; color: #cbd5e1; }
 .popup-line.strong { color: #7dd3fc; font-weight: 600; }
+.legend {
+  margin-top: 8px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #cbd5e1;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  max-width: 260px;
+}
+.legend span {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  margin-right: 3px;
+  vertical-align: middle;
+  border: 1px solid rgba(255,255,255,0.3);
+}
+.bg-toggle {
+  display: flex;
+  gap: 6px;
+}
+.bg-toggle button {
+  background: #1e293b;
+  color: #94a3b8;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.bg-toggle button.active {
+  background: #0ea5e9;
+  color: #04121f;
+  border-color: #0ea5e9;
+  font-weight: 600;
+}

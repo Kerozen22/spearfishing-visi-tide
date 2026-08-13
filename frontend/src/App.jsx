@@ -3,9 +3,34 @@ import Map, { Marker, Popup } from 'react-map-gl'
 import maplibregl from 'maplibre-gl'
 import { fmtTime, fmtDate } from './lib/geo.js'
 
-// Style de base : tuiles OSM libres (fond fiable universel).
-const BASE_STYLE = {
+// Style "bathymétrie" : relief des fonds marins EMODnet en couleurs de
+// profondeur (c'est le fond par défaut). NB: serveur de tuiles standard {z}/{x}/{y}
+// (TileMatrixSet web_mercator), chargé en CORS via transformRequest.
+const BATHY_STYLE = {
   version: 8,
+  glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+  sources: {
+    bathy: {
+      type: 'raster',
+      // ?v=4 : version de cache (purge les tuiles no-cors échouées mémorisées).
+      tiles: [
+        'https://tiles.emodnet-bathymetry.eu/latest/mean_multicolour/web_mercator/{z}/{x}/{y}.png?v=4',
+      ],
+      tileSize: 256,
+      minzoom: 0,
+      maxzoom: 14,
+      attribution: 'Bathymétrie © EMODnet',
+    },
+  },
+  layers: [
+    { id: 'bathy', type: 'raster', source: 'bathy' },
+  ],
+}
+
+// Style "carte routière" : tuiles OSM classiques.
+const OSM_STYLE = {
+  version: 8,
+  glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
   sources: {
     osm: {
       type: 'raster',
@@ -35,6 +60,11 @@ export default function App() {
   const [sliderIdx, setSliderIdx] = useState(null)
   const [error, setError] = useState(null)
   const [baseline] = useState({ lat: 48.99, lng: -4.52 })
+  const [showBathy, setShowBathy] = useState(true)  // fond bathymétrie par défaut
+  const mapRef = useRef(null)
+
+  // Bascule de fond via mapStyle natif react-map-gl (fiable) : on change le
+  // style complet plutot que de jouer sur la visibilité des couches à la volée.
 
   // Charge la timeline 24h (marée + visi par heure) pour le slider
   useEffect(() => {
@@ -77,13 +107,28 @@ export default function App() {
   const displayLabel = currentPoint ? fmtTime(currentPoint.at) : '—'
   const displayVisi = currentPoint ? currentPoint.visi_m : null
 
+  // Le serveur EMODnet rejette les requêtes no-cors que MapLibre envoie par
+  // défaut pour les tuiles raster. On interpose donc un fetch en CORS (mode
+  // 'cors'), on lit la tuile PNG et on la fournit à MapLibre en URL data:.
+  const transformRequest = (url, resourceType) => {
+    if (resourceType === 'Tile' && url.includes('emodnet-bathymetry.eu')) {
+      return {
+        url,
+        fetchOptions: { mode: 'cors', credentials: 'omit' },
+      }
+    }
+    return undefined
+  }
+
   return (
     <div className="app">
       <Map
         {...viewport}
+        ref={mapRef}
+        transformRequest={transformRequest}
         onMove={(e) => setViewport(e.viewState)}
         style={{ width: '100%', height: '100vh' }}
-        mapStyle={BASE_STYLE}
+        mapStyle={showBathy ? BATHY_STYLE : OSM_STYLE}
         mapLib={maplibregl}
         onClick={onMapClick}
       >
@@ -105,6 +150,25 @@ export default function App() {
           </Popup>
         )}
       </Map>
+
+      <div className="hud top-left">
+        <div className="bg-toggle">
+          <button className={showBathy ? 'active' : ''} onClick={() => setShowBathy(true)}>
+            🌊 Relief + profondeurs
+          </button>
+          <button className={!showBathy ? 'active' : ''} onClick={() => setShowBathy(false)}>
+            🗺️ Carte routière
+          </button>
+        </div>
+        {showBathy && (
+          <div className="legend">
+            <span style={{ background: '#ffd700' }} /> 0–5m
+            <span style={{ background: '#2e8b57' }} /> –20m
+            <span style={{ background: '#1e90ff' }} /> –60m
+            <span style={{ background: '#1a1a8a' }} /> &gt;–100m
+          </div>
+        )}
+      </div>
 
       <div className="hud top-right">
         <span className="dot" style={{ background: visiColor(displayVisi ?? 0) }} />
