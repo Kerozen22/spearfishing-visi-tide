@@ -25,6 +25,7 @@ import httpx
 
 from .visibility import OceanParams, estimate_visibility, VisibilityResult
 from .copernicus import fetch_spm_copernicus
+from .tides_ref import compute_tide
 
 OPENMETEO_BASE = "https://marine-api.open-meteo.com/v1/marine"
 
@@ -149,15 +150,20 @@ async def build_visibility(lat: float, lng: float,
     wind = _pick_at_hour(marine, when, "wind_speed_10m")
     cur = _pick_at_hour(marine, when, "ocean_current_velocity")
 
-    # --- Marée ---
+    # --- Marée (modèle harmonique calibré sur le port de référence SHOM) ---
+    # Si un coefficient est fourni en override (tests) on le respecte
+    # sinon on fait le calcul complet (port de référence + coef + hauteur).
     if api_override and "coef" in api_override:
         coef = api_override["coef"]
+        marnage = api_override.get("marnage", 6.0)
+        offset_h = api_override.get("water_offset", 0.5)
+        tide_ref = "SAINT-MALO"
     else:
-        coef, marnage = _infer_tidal_coefficient(lat, lng, when)
-
-    # Hauteur d'eau réelle = profondeur carte + offset. Sans API de marée,
-    # on estime la hauteur avec le même modèle harmonique simplifié.
-    offset_h, _ = _synthetic_tide_offset(lat, lng, when)
+        tide = compute_tide(lat, lng, when)
+        coef = tide["coefficient"]
+        marnage = tide["marnage_m"]
+        offset_h = tide["water_level_offset_m"]
+        tide_ref = tide["reference_cst"]
 
     # Profondeur carte au point (EMODnet, gratuit, pour le proxy turbidité).
     depth_m = await fetch_depth_emodnet(lat, lng)

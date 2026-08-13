@@ -46,10 +46,20 @@ body, #root, .app {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 .timeline {
   flex: 1;
+  min-width: 120px;
   accent-color: #38bdf8;
+}
+.timeline-ref {
+  margin-top: 5px;
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+  border-top: 1px solid #1e293b;
+  padding-top: 5px;
 }
 
 /* Toasts */

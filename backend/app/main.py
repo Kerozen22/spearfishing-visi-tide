@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .tide_plus import build_visibility, _infer_tidal_coefficient, _synthetic_tide_offset
+from .tides_ref import compute_tide, resolve_reference_port
 from .visibility import estimate_visibility, OceanParams, tidal_coefficient_from_range
 
 app = FastAPI(
@@ -181,8 +182,9 @@ async def spot(
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Source de données indisponible : {e}")
 
-    coef, marnage = _infer_tidal_coefficient(lat, lng, when)
-    offset_h, _ = _synthetic_tide_offset(lat, lng, when)
+    tide = compute_tide(lat, lng, when)
+    coef = tide["coefficient"]
+    offset_h = tide["water_level_offset_m"]
     next_high, next_low = _next_extremes(lat, lng, when)
     # Profondeur carte (négative en mer) : exposée via le facteur depth_chart_m.
     depth = result.factors.get("depth_chart_m")
@@ -216,8 +218,9 @@ async def timeline(
     for i in range(0, hours * 60, step):
         t = when + timedelta(minutes=i)
         r = await build_visibility(lat, lng, t)
-        coef, _ = _infer_tidal_coefficient(lat, lng, t)
-        offset_h, _ = _synthetic_tide_offset(lat, lng, t)
+        tide = compute_tide(lat, lng, t)
+        coef = tide["coefficient"]
+        offset_h = tide["water_level_offset_m"]
         points.append({
             "at": t.isoformat(),
             "visi_m": r.score_m,
@@ -245,13 +248,18 @@ def _parse_at(at: Optional[str]) -> datetime:
 
 
 def _next_extremes(lat: float, lng: float, when: datetime) -> tuple[datetime, datetime]:
-    """Prochaine pleine mer et basse mer via le modèle harmonique simplifié.
+    """Prochaine pleine mer et basse mer via le modèle harmonique calibré.
 
-    On cherche les zéros de la dérivée de la hauteur sur les prochaines 25h.
+    On cherche les extrema de la hauteur (dérivée ~ 0) sur les prochaines 25h.
+    On se base sur la courbe du port de référence (tide_height_at), ce qui
+    garde une cohérence totale avec la hauteur d'eau affichée dans l'app.
     """
+    port = resolve_reference_port(lat, lng)
+    ref = port.get("ref") or "SAINT-MALO"
+
     def h(t: datetime) -> float:
-        val, _ = _synthetic_tide_offset(lat, lng, t)
-        return val
+        tid = compute_tide(lat, lng, t)
+        return tid["water_level_offset_m"]
 
     def derivative(t: datetime, dt_h: float = 0.1) -> float:
         s_plus = (t + timedelta(hours=dt_h))
@@ -262,7 +270,6 @@ def _next_extremes(lat: float, lng: float, when: datetime) -> tuple[datetime, da
     t = when
     step = timedelta(minutes=10)
     prev_d = derivative(t)
-    prev_h = h(t)
     for _ in range(int(25 * 6)):  # 25h / 10min
         t += step
         d = derivative(t)

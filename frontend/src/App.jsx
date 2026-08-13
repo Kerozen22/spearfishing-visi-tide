@@ -200,10 +200,14 @@ export default function App() {
       <div className="hud bottom">
         <div className="timeline-row">
           <span className="muted">Marée : {fmtDate(currentPoint?.at || new Date().toISOString())}</span>
+          <span className="muted">· Coef {currentPoint ? currentPoint.tidal_coefficient?.toFixed(0) : '—'}</span>
           <input type="range" min={0} max={Math.max(0, timeline.length - 1)}
                  value={sliderIdx ?? 0} onChange={(e) => setSliderIdx(Number(e.target.value))}
                  className="timeline" />
           <span className="muted">+24h · {waterOffset.toFixed(1)}m</span>
+        </div>
+        <div className="timeline-ref">
+          🌊 Hauteur d'eau estimée · réf. port Saint-Malo (SHOM)
         </div>
       </div>
 
