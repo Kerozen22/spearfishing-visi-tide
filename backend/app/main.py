@@ -16,9 +16,10 @@ import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -60,6 +61,33 @@ class SpotInfo(BaseModel):
 @app.get("/health")
 async def health():
     return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
+
+
+# ---------------------------------------------------------------------------
+# Proxy de tuiles bathymétriques EMODnet.
+# Le serveur EMODnet rejette les requêtes no-cors de MapLibre et son cache est
+# fragile dans le navigateur. En passant par notre API (même origine), la carte
+# charge des tuiles via notre domaine : aucun problème de CORS/cache. On ajoute
+# un en-tête Cache-Control pour limiter les appels sortants.
+# ---------------------------------------------------------------------------
+_EMODNET_TILE = "https://tiles.emodnet-bathymetry.eu/latest/mean_multicolour/web_mercator/{z}/{x}/{y}.png"
+
+
+@app.get("/v1/bathytile/{z}/{x}/{y}")
+async def bathytile(z: int, x: int, y: int):
+    url = _EMODNET_TILE.format(z=z, x=x, y=y)
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(url)
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"Erreur proxy EMODnet : {e!r}")
+    if r.status_code != 200:
+        raise HTTPException(r.status_code, "Tuile indisponible sur EMODnet")
+    return Response(
+        content=r.content,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},  # 24h
+    )
 
 
 @app.get("/v1/spot", response_model=SpotInfo)

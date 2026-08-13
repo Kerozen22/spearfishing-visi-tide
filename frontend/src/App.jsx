@@ -4,18 +4,16 @@ import maplibregl from 'maplibre-gl'
 import { fmtTime, fmtDate } from './lib/geo.js'
 
 // Style "bathymétrie" : relief des fonds marins EMODnet en couleurs de
-// profondeur (c'est le fond par défaut). NB: serveur de tuiles standard {z}/{x}/{y}
-// (TileMatrixSet web_mercator), chargé en CORS via transformRequest.
+// profondeur. Les tuiles passent par notre proxy /v1/bathytile/{z}/{x}/{y}
+// (même origine) : court-circuite les soucis de CORS et de cache navigateur
+// du serveur EMODnet direct.
 const BATHY_STYLE = {
   version: 8,
   glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
   sources: {
     bathy: {
       type: 'raster',
-      // ?v=4 : version de cache (purge les tuiles no-cors échouées mémorisées).
-      tiles: [
-        'https://tiles.emodnet-bathymetry.eu/latest/mean_multicolour/web_mercator/{z}/{x}/{y}.png?v=4',
-      ],
+      tiles: ['/v1/bathytile/{z}/{x}/{y}'],
       tileSize: 256,
       minzoom: 0,
       maxzoom: 14,
@@ -107,25 +105,11 @@ export default function App() {
   const displayLabel = currentPoint ? fmtTime(currentPoint.at) : '—'
   const displayVisi = currentPoint ? currentPoint.visi_m : null
 
-  // Le serveur EMODnet rejette les requêtes no-cors que MapLibre envoie par
-  // défaut pour les tuiles raster. On interpose donc un fetch en CORS (mode
-  // 'cors'), on lit la tuile PNG et on la fournit à MapLibre en URL data:.
-  const transformRequest = (url, resourceType) => {
-    if (resourceType === 'Tile' && url.includes('emodnet-bathymetry.eu')) {
-      return {
-        url,
-        fetchOptions: { mode: 'cors', credentials: 'omit' },
-      }
-    }
-    return undefined
-  }
-
   return (
     <div className="app">
       <Map
         {...viewport}
         ref={mapRef}
-        transformRequest={transformRequest}
         onMove={(e) => setViewport(e.viewState)}
         style={{ width: '100%', height: '100vh' }}
         mapStyle={showBathy ? BATHY_STYLE : OSM_STYLE}
