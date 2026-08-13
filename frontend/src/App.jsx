@@ -83,7 +83,7 @@ function visiColor(score) {
 
 export default function App() {
   const [viewport, setViewport] = useState({
-    longitude: -4.45, latitude: 48.4, zoom: 9,
+    longitude: -2.19, latitude: 48.577, zoom: 12,
   })
   const [selected, setSelected] = useState(null)
   const [spotData, setSpotData] = useState(null)
@@ -91,7 +91,7 @@ export default function App() {
   const [timeline, setTimeline] = useState([])
   const [sliderIdx, setSliderIdx] = useState(null)
   const [error, setError] = useState(null)
-  const [baseline] = useState({ lat: 48.99, lng: -4.52 })
+  const [baseline] = useState({ lat: 48.577, lng: -2.19 })
   const mapRef = useRef(null)
 
   // Charge la timeline 24h (marée + visi par heure) pour le slider
@@ -135,13 +135,25 @@ export default function App() {
   const displayLabel = currentPoint ? fmtTime(currentPoint.at) : '—'
   const displayVisi = currentPoint ? currentPoint.visi_m : null
 
-  // Au chargement de la Map, force un repaint + recharge de la source SHOM
-  // pour fiabiliser l'affichage des tuiles raster (écran blanc intermittent).
+  // Écran blanc intermittent : les tuiles raster se chargent mais MapLibre ne
+  // les peint pas toujours. On recharge toutes les sources SHOM et on force
+  // plusieurs repaints (immédiat + différés) pour fiabiliser l'affichage.
   const onMapLoad = () => {
     try {
       const m = mapRef.current
       if (!m) return
-      m.triggerRepaint?.()
+      const reload = () => {
+        try {
+          for (const id of ['shom_fond', 'shom_marines', 'shom_toponymie', 'shom_balisage']) {
+            m.getSource(id)?.reload?.()
+          }
+          m.triggerRepaint?.()
+        } catch (e) { /* no-op */ }
+      }
+      reload()
+      setTimeout(reload, 600)
+      setTimeout(reload, 1800)
+      setTimeout(reload, 4000)
     } catch (e) { console.error('onMapLoad:', e) }
   }
 
@@ -158,7 +170,7 @@ export default function App() {
         mapLib={maplibregl}
         onClick={onMapClick}
       >
-        <Marker longitude={-4.45} latitude={48.4} color={visiColor(displayVisi ?? 3)} />
+        <Marker longitude={-2.19} latitude={48.577} color={visiColor(displayVisi ?? 3)} />
 
         {selected && spotData && (
           <Popup longitude={selected.lng} latitude={selected.lat}
