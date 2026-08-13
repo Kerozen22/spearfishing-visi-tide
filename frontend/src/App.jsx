@@ -115,6 +115,19 @@ export default function App() {
   const currentPoint = timeline[sliderIdx] || null
   const waterOffset = currentPoint?.water_level_offset_m ?? 0
 
+  // Vue du popup = combinaison du spot cliqué (fond fixe) et de l'heure
+  // courante de la timeline (marée, visi, coef qui varient avec le temps).
+  // Le fond (depth_chart_m) est une donnée de la carte, indépendante de l'heure.
+  const popupView = spotData && currentPoint ? {
+    ...spotData,
+    water_level_offset_m: currentPoint.water_level_offset_m,
+    visi_m: currentPoint.visi_m,
+    visi_qualitative: currentPoint.visi_qualitative,
+    color_hex: currentPoint.color_hex,
+    tidal_coefficient: currentPoint.tidal_coefficient,
+    at: currentPoint.at,
+  } : spotData
+
   async function onMapClick(evt) {
     const { lng, lat } = evt.lngLat
     setSelected({ lat, lng })
@@ -172,19 +185,19 @@ export default function App() {
       >
         <Marker longitude={-2.19} latitude={48.577} color={visiColor(displayVisi ?? 3)} />
 
-        {selected && spotData && (
+        {selected && popupView && (
           <Popup longitude={selected.lng} latitude={selected.lat}
                  onClose={() => { setSelected(null); setSpotData(null) }}>
-            <strong>{spotData.visi_m} m</strong>
-            <div style={{ color: spotData.color_hex, fontWeight: 700 }}>
-              {spotData.visi_qualitative}
+            <strong>{popupView.visi_m} m</strong>
+            <div style={{ color: popupView.color_hex, fontWeight: 700 }}>
+              {popupView.visi_qualitative}
             </div>
-            <div className="popup-line">Fond : {Math.abs(spotData.depth_chart_m).toFixed(1)} m</div>
-            <div className="popup-line">Marée (eau) : {spotData.water_level_offset_m.toFixed(2)} m</div>
+            <div className="popup-line">Fond : {Math.abs(popupView.depth_chart_m).toFixed(1)} m</div>
+            <div className="popup-line">Marée (eau) : {popupView.water_level_offset_m.toFixed(2)} m</div>
             <div className="popup-line strong">
-              Profondeur réelle : {Math.max(0, (spotData.water_level_offset_m - spotData.depth_chart_m)).toFixed(1)} m
+              Profondeur réelle : {Math.max(0, (popupView.water_level_offset_m - popupView.depth_chart_m)).toFixed(1)} m
             </div>
-            <small>Coef {spotData.tidal_coefficient} · à {fmtTime(spotData.at)}</small>
+            <small>Coef {popupView.tidal_coefficient} · à {fmtTime(popupView.at)}</small>
           </Popup>
         )}
       </Map>
