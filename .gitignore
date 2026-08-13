@@ -7,6 +7,7 @@ __pycache__/
 # Builds
 dist/
 dist-ssr/
+public/
 
 # Logs
 *.log

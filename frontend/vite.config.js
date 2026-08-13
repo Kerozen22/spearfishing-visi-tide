@@ -8,8 +8,8 @@ export default defineConfig({
   plugins: [react()],
   root: frontendDir,
   build: {
-    // Vercel construit depuis la racine -> on sort le dist dans /dist racine.
-    outDir: '../dist',
+    // Vercel + FastAPI sert les assets statiques depuis public/ (doc officielle).
+    outDir: '../public',
     emptyOutDir: true,
   },
   server: {
