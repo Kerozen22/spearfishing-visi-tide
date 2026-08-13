@@ -19,20 +19,6 @@ body, #root, .app {
   box-shadow: 0 4px 20px rgba(0,0,0,.3);
 }
 .top-right { top: 14px; right: 14px; display: flex; align-items: center; gap: 8px; }
-.bottom { bottom: 18px; left: 50%; transform: translateX(-50%); width: min(720px, 92vw); }
-
-/* Mobile : panneau visi/marée remonte au-dessus du slider de marée. */
-@media (max-width: 640px) {
-  .top-right {
-    top: auto;
-    bottom: 84px;
-    right: 50%;
-    transform: translateX(50%);
-  }
-  .bottom {
-    bottom: 14px;
-  }
-}
 
 .dot {
   width: 14px; height: 14px; border-radius: 50%;
@@ -42,24 +28,10 @@ body, #root, .app {
 .muted { color: #94a3b8; font-size: 12px; }
 .tide { color: #38bdf8; font-size: 13px; font-weight: 600; padding-left: 6px; border-left: 1px solid #475569; }
 
-.timeline-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
 .timeline {
   flex: 1;
   min-width: 120px;
   accent-color: #38bdf8;
-}
-.timeline-ref {
-  margin-top: 5px;
-  font-size: 11px;
-  color: #64748b;
-  text-align: center;
-  border-top: 1px solid #1e293b;
-  padding-top: 5px;
 }
 
 /* Toasts */
@@ -78,20 +50,92 @@ body, #root, .app {
 }
 .toast.error { background: #7f1d1d; border-color: #b91c1c; }
 
-/* Popup MapLibre */
-.maplibregl-popup-content {
-  background: #0f172a !important;
+/* Popup MapLibre (plus utilisé en fiche flottante, gardé pour compat) */
+.maplibregl-popup-content { display: none; }
+
+/* ------------------------------------------------------------------ */
+/* Fiche spot en bas (bottom-sheet)                                     */
+/* ------------------------------------------------------------------ */
+.spot-sheet {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 12;
+  background: rgba(10, 16, 30, 0.96);
   color: #e2e8f0;
-  border-radius: 10px;
-  padding: 12px 14px;
-  font-size: 13px;
+  border-top: 1px solid #1e293b;
+  border-radius: 16px 16px 0 0;
+  padding: 12px 16px calc(14px + env(safe-area-inset-bottom));
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.5);
+  max-width: 640px;
+  margin: 0 auto;
 }
-.maplibregl-popup-tip {
-  border-top-color: #0f172a !important;
-  border-bottom-color: #0f172a !important;
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
 }
-.popup-line { font-size: 12px; margin-top: 4px; color: #cbd5e1; }
-.popup-line.strong { color: #7dd3fc; font-weight: 600; }
+.sheet-coords { display: flex; flex-direction: column; line-height: 1.2; }
+.sheet-title { font-weight: 700; font-size: 14px; }
+.day-nav { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.day-btn {
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  width: 30px; height: 30px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.day-btn:active { background: #334155; }
+.day-label {
+  font-size: 12px;
+  color: #94a3b8;
+  min-width: 86px;
+  text-align: center;
+  text-transform: capitalize;
+}
+.sheet-close {
+  background: transparent;
+  color: #94a3b8;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px;
+}
+.sheet-close:active { color: #e2e8f0; }
+.sheet-stats {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  text-align: center;
+  margin-bottom: 12px;
+}
+.stat { flex: 1; display: flex; flex-direction: column; }
+.stat-value { font-size: 16px; font-weight: 700; color: #e2e8f0; }
+.stat-label { font-size: 11px; color: #94a3b8; margin-top: 2px; text-transform: uppercase; letter-spacing: .3px; }
+.sheet-slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid #1e293b;
+  padding-top: 10px;
+}
+.sheet-slider .timeline { flex: 1; }
+.sheet-ref {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .stat-value { font-size: 14px; }
+  .day-label { min-width: 72px; font-size: 11px; }
+  .top-right { top: auto; bottom: 90px; right: 50%; transform: translateX(50%); }
+}
 .map-fallback {
   position: absolute;
   inset: 0;

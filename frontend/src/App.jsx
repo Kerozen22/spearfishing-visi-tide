@@ -1,7 +1,7 @@
 import React, { Component, useEffect, useRef, useState } from 'react'
-import Map, { Marker, Popup } from 'react-map-gl'
+import Map, { Marker } from 'react-map-gl'
 import maplibregl from 'maplibre-gl'
-import { fmtTime, fmtDate } from './lib/geo.js'
+import { fmtTime } from './lib/geo.js'
 
 // Garde-fou : si la carte (MapLibre/WebGL) crash sur un appareil, on évite
 // l'écran blanc : on affiche un fond neutre + message, le reste de l'UI reste.
@@ -85,32 +85,56 @@ export default function App() {
   const [viewport, setViewport] = useState({
     longitude: -2.19, latitude: 48.577, zoom: 12,
   })
-  const [selected, setSelected] = useState(null)
-  const [spotData, setSpotData] = useState(null)
+  const [selected, setSelected] = useState(null)   // {lat, lng} du spot cliqué
+  const [spotData, setSpotData] = useState(null)   // fiche du spot (fond fixe)
   const [loading, setLoading] = useState(false)
-  const [timeline, setTimeline] = useState([])
+  const [timeline, setTimeline] = useState([])     // points 24h du jour choisi
   const [sliderIdx, setSliderIdx] = useState(null)
+  const [dayOffset, setDayOffset] = useState(0)    // 0=aujourd'hui, -1=hier, +1=demain
   const [error, setError] = useState(null)
-  const [baseline] = useState({ lat: 48.577, lng: -2.19 })
   const mapRef = useRef(null)
 
-  // Charge la timeline 24h (marée + visi par heure) pour le slider
+  // Charge la timeline 24h pour le SPOT cliqué et le JOUR choisi (dayOffset).
+  // La timeline ne s'affiche que quand un spot est sélectionné.
+  const timelineTarget = selected || null
+
   useEffect(() => {
+    if (!timelineTarget) {
+      setTimeline([])
+      setSliderIdx(null)
+      return
+    }
     let mounted = true
     async function load() {
+      // Heure de début = début (00:00 UTC) du jour cible pour naviguer
+      // tranquillement : aujourd'hui commence maintenant, autres jours à 00:00.
+      const base = new Date()
+      base.setUTCHours(0, 0, 0, 0)
+      const start = new Date(base)
+      start.setUTCDate(base.getUTCDate() + dayOffset)
+      const startIso = start.toISOString()
       try {
-        const res = await fetch(`/v1/timeline?lat=${baseline.lat}&lng=${baseline.lng}&hours=24&step=60`)
+        const res = await fetch(
+          `/v1/timeline?lat=${timelineTarget.lat}&lng=${timelineTarget.lng}`
+          + `&start=${startIso}&hours=24&step=60`)
+        if (!res.ok) throw new Error()
         const data = await res.json()
         if (!mounted) return
         setTimeline(data.points || [])
-        setSliderIdx(0)
+        // Sélectionne l'heure courante si on est sur aujourd'hui, sinon début de jour
+        const now = Date.now()
+        const curIdx = (data.points || []).findIndex((p) => {
+          const t = new Date(p.at).getTime()
+          return now >= t && now < t + 3600000
+        })
+        setSliderIdx(dayOffset === 0 && curIdx >= 0 ? curIdx : data.points.length ? 0 : null)
       } catch (e) {
-        setError('Impossible de charger la timeline. Backend lancé ?')
+        if (mounted) setError('Impossible de charger la timeline. Backend lancé ?')
       }
     }
     load()
     return () => { mounted = false }
-  }, [baseline])
+  }, [timelineTarget, dayOffset])
 
   const currentPoint = timeline[sliderIdx] || null
   const waterOffset = currentPoint?.water_level_offset_m ?? 0
@@ -170,6 +194,14 @@ export default function App() {
     } catch (e) { console.error('onMapLoad:', e) }
   }
 
+  // Libellé du jour pour l'en-tête de la fiche
+  const dayLabel = (offset) => {
+    const d = new Date()
+    d.setUTCHours(0, 0, 0, 0)
+    d.setUTCDate(d.getUTCDate() + offset)
+    return d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })
+  }
+
   return (
     <div className="app">
       <MapBoundary>
@@ -183,22 +215,10 @@ export default function App() {
         mapLib={maplibregl}
         onClick={onMapClick}
       >
-        <Marker longitude={-2.19} latitude={48.577} color={visiColor(displayVisi ?? 3)} />
-
+        {/* Marqueur au point du spot sélectionné (pas de popup flottant) */}
         {selected && popupView && (
-          <Popup longitude={selected.lng} latitude={selected.lat}
-                 onClose={() => { setSelected(null); setSpotData(null) }}>
-            <strong>{popupView.visi_m} m</strong>
-            <div style={{ color: popupView.color_hex, fontWeight: 700 }}>
-              {popupView.visi_qualitative}
-            </div>
-            <div className="popup-line">Fond : {Math.abs(popupView.depth_chart_m).toFixed(1)} m</div>
-            <div className="popup-line">Marée (eau) : {popupView.water_level_offset_m.toFixed(2)} m</div>
-            <div className="popup-line strong">
-              Profondeur réelle : {Math.max(0, (popupView.water_level_offset_m - popupView.depth_chart_m)).toFixed(1)} m
-            </div>
-            <small>Coef {popupView.tidal_coefficient} · à {fmtTime(popupView.at)}</small>
-          </Popup>
+          <Marker longitude={selected.lng} latitude={selected.lat}
+                  color={visiColor(popupView.visi_m ?? 3)} />
         )}
       </Map>
       </MapBoundary>
@@ -210,19 +230,69 @@ export default function App() {
         <span className="tide">🌊 {waterOffset.toFixed(1)} m</span>
       </div>
 
-      <div className="hud bottom">
-        <div className="timeline-row">
-          <span className="muted">Marée : {fmtDate(currentPoint?.at || new Date().toISOString())}</span>
-          <span className="muted">· Coef {currentPoint ? currentPoint.tidal_coefficient?.toFixed(0) : '—'}</span>
-          <input type="range" min={0} max={Math.max(0, timeline.length - 1)}
-                 value={sliderIdx ?? 0} onChange={(e) => setSliderIdx(Number(e.target.value))}
-                 className="timeline" />
-          <span className="muted">+24h · {waterOffset.toFixed(1)}m</span>
+      {/* Fiche spot en bas : infos + sélecteur de jour + slider 24h */}
+      {selected && popupView && (
+        <div className="spot-sheet">
+          {/* En-tête : coordonnées + navigation de jour */}
+          <div className="sheet-head">
+            <div className="sheet-coords">
+              <span className="sheet-title">Spot</span>
+              <span className="muted">
+                {selected.lat.toFixed(4)}, {selected.lng.toFixed(4)}
+              </span>
+            </div>
+            <div className="day-nav">
+              <button className="day-btn" onClick={() => setDayOffset((d) => d - 1)}
+                      aria-label="Jour précédent">◀</button>
+              <span className="day-label">{dayLabel(dayOffset)}</span>
+              <button className="day-btn" onClick={() => setDayOffset((d) => d + 1)}
+                      aria-label="Jour suivant">▶</button>
+            </div>
+            <button className="sheet-close" onClick={() => { setSelected(null); setSpotData(null) }}
+                    aria-label="Fermer">✕</button>
+          </div>
+
+          {/* Ligne de données principales */}
+          <div className="sheet-stats">
+            <div className="stat">
+              <span className="stat-value" style={{ color: popupView.color_hex }}>
+                {popupView.visi_m.toFixed(1)} m
+              </span>
+              <span className="stat-label">{popupView.visi_qualitative}</span>
+            </div>
+            <div className="stat">
+              <span className="stat-value">{Math.abs(popupView.depth_chart_m).toFixed(1)} m</span>
+              <span className="stat-label">Fond</span>
+            </div>
+            <div className="stat">
+              <span className="stat-value">{popupView.water_level_offset_m.toFixed(1)} m</span>
+              <span className="stat-label">Eau</span>
+            </div>
+            <div className="stat">
+              <span className="stat-value" style={{ color: '#7dd3fc' }}>
+                {Math.max(0, popupView.water_level_offset_m - popupView.depth_chart_m).toFixed(1)} m
+              </span>
+              <span className="stat-label">Prof. réelle</span>
+            </div>
+            <div className="stat">
+              <span className="stat-value">{popupView.tidal_coefficient?.toFixed(0)}</span>
+              <span className="stat-label">Coef</span>
+            </div>
+          </div>
+
+          {/* Slider temporel 24h du jour choisi */}
+          {timeline.length > 1 && (
+            <div className="sheet-slider">
+              <span className="muted">{popupView.at ? fmtTime(popupView.at) : '—'}</span>
+              <input type="range" min={0} max={timeline.length - 1}
+                     value={sliderIdx ?? 0} onChange={(e) => setSliderIdx(Number(e.target.value))}
+                     className="timeline" />
+              <span className="muted">{waterOffset.toFixed(1)}m</span>
+            </div>
+          )}
+          <div className="sheet-ref">🌊 Marée estimée par modèle · réf. Saint-Malo (SHOM)</div>
         </div>
-        <div className="timeline-ref">
-          🌊 Marée estimée par modèle · réf. port Saint-Malo (SHOM)
-        </div>
-      </div>
+      )}
 
       {error && <div className="toast error">{error}</div>}
       {loading && <div className="toast">Chargement du spot…</div>}

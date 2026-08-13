@@ -215,11 +215,16 @@ async def spot(
 async def timeline(
     lat: float = Query(..., ge=-90, le=90),
     lng: float = Query(..., ge=-180, le=180),
-    hours: int = Query(48, ge=1, le=72, description="Nombre d'heures de prévision"),
+    start: Optional[str] = Query(None, description="ISO datetime UTC de début. Défaut = maintenant"),
+    hours: int = Query(24, ge=1, le=72, description="Nombre d'heures de prévision"),
     step: int = Query(60, ge=15, le=360, description="Pas en minutes"),
 ):
-    """Série temporelle pour le slider : visi + profondeur + marée par pas."""
-    when = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    """Série temporelle pour le slider : visi + profondeur + marée par pas.
+
+    `start` permet de naviguer sur un jour précis (passé ou futur) : on passe
+    la date choisie par le sélecteur de jour de la fiche spot.
+    """
+    when = _parse_at(start).replace(minute=0, second=0, microsecond=0)
     points = []
     for i in range(0, hours * 60, step):
         t = when + timedelta(minutes=i)
@@ -227,12 +232,14 @@ async def timeline(
         points.append({
             "at": t.isoformat(),
             "visi_m": r.score_m,
-            "qualitative": r.qualitative,
+            "visi_qualitative": r.qualitative,
+            "color_hex": r.color_hex,
             "water_level_offset_m": r.water_level_offset_m,
             "tidal_coefficient": r.tidal_coefficient,
             "factors": r.factors,
         })
-    return {"lat": lat, "lng": lng, "step_minutes": step, "points": points}
+    return {"lat": lat, "lng": lng, "start": when.isoformat(),
+            "step_minutes": step, "points": points}
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +249,11 @@ def _parse_at(at: Optional[str]) -> datetime:
     if not at:
         return datetime.now(timezone.utc)
     try:
-        dt = datetime.fromisoformat(at)
+        s = at
+        # Python 3.9 n'accepte pas le suffixe 'Z' (norme ISO); on le normalise.
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt
