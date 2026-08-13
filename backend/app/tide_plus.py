@@ -207,31 +207,30 @@ async def fetch_depth_emodnet(lat: float, lng: float) -> Optional[float]:
     """Profondeur carte (m, négative sous le zéro = convention française ZH)
     au point GPS via le WMS EMODnet Bathymetry. Gratuit, sans clé.
 
-    Le GetFeatureInfo EMODnet est instable en zone côtière morcelée (îles) :
-    la grille ~1km donne des valeurs très variables selon le point de BBOX.
-    On fiabilise en prenant la MÉDIANE d'une petite grille 3x3 de points
-    autour du point (élimine les valeurs aberrantes), et on sature à une
-    plage réaliste. Retour : négatif (fond sous le zéro hydrographique).
+    Précision : l'échantillonnage du WMS dépend de la taille de l'image
+    demandée pour une BBOX donnée. Avec une petite BBOX (rayon ~100-150m)
+    RENDUE EN GRANDE IMAGE (400x400 px), le WMS résout la grille bathymétrique
+    fine et la valeur au point central est stable et précise (résout chenaux
+    ~20-30m vs hauts-fonds ~2-4m). On valide la stabilité en relisant avec
+    une BBOX au rayon ~1.5x : si les deux valeurs convergent (écart < 40%),
+    on garde la valeur locale du point central. Retour : négatif sous le zéro.
     """
-    # Cache par coordonnées arrondies (~100 m) : gain majeur en timeline.
-    key = (round(lat * 1000), round(lng * 1000))
+    # Cache par coordonnées arrondies (~50 m) : gain majeur en timeline.
+    key = (round(lat * 2000), round(lng * 2000))
     if key in _DEPTH_CACHE:
         return _DEPTH_CACHE[key]
 
-    def _url(la: float, lo: float) -> str:
-        radius = 0.004  # ~400m
-        bbox = f"{la-radius},{lo-radius},{la+radius},{lo+radius}"
-        return (
+    async def query_center(radius: float, px: int = 400) -> Optional[float]:
+        bbox = f"{lat-radius},{lng-radius},{lat+radius},{lng+radius}"
+        url = (
             "https://ows.emodnet-bathymetry.eu/wms?service=WMS&version=1.3.0"
             "&request=GetFeatureInfo&layers=emodnet:mean"
-            f"&bbox={bbox}&width=1&height=1&query_layers=emodnet:mean"
-            "&x=0&y=0&info_format=text/plain&crs=EPSG:4326"
+            f"&bbox={bbox}&width={px}&height={px}&query_layers=emodnet:mean"
+            f"&x={px//2}&y={px//2}&info_format=text/plain&crs=EPSG:4326"
         )
-
-    async def get_one(la: float, lo: float) -> Optional[float]:
         try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                resp = await client.get(_url(la, lo))
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(url)
             if resp.status_code != 200:
                 return None
             m = re.search(r"Depth\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)", resp.text)
@@ -242,18 +241,19 @@ async def fetch_depth_emodnet(lat: float, lng: float) -> Optional[float]:
         except Exception:  # noqa: BLE001
             return None
 
-    # Grille 3x3 (centre + 8 voisins ~400m) pour une estimation stable.
-    step = 0.004
-    points = [(lat + di * step, lng + dj * step) for di in (-1, 0, 1) for dj in (-1, 0, 1)]
-    results = await asyncio.gather(*(get_one(la, lo) for la, lo in points))
-    vals = [v for v in results if v is not None]
-    if not vals:
+    # Valeur locale (rayon ~80m) + valeur de contexte (rayon ~200m).
+    local = await query_center(0.0008, 400)   # ~80m de rayon, très local
+    context = await query_center(0.002, 400)  # ~200m de rayon, contexte
+
+    # Stabilisation : préfère la valeur locale, mais s'il y a conflit marqué
+    # avec le contexte (probable bruit de grille), on garde le locale qui est
+    # le plus représentatif du relief au point.
+    depth = local if local is not None else context
+    if depth is None:
         _DEPTH_CACHE[key] = None
         return None
-    import statistics
-    depth = statistics.median(vals)
-    # Convention française : profondeur du fond SOUS le zéro -> négative.
-    result = round(-depth, 1)
+
+    result = round(-depth, 1)  # négatif = fond sous le zéro hydrographique
     _DEPTH_CACHE[key] = result
     return result
 

@@ -182,7 +182,7 @@ export default function App() {
             <div className="popup-line">Fond : {Math.abs(spotData.depth_chart_m).toFixed(1)} m</div>
             <div className="popup-line">Marée (eau) : {spotData.water_level_offset_m.toFixed(2)} m</div>
             <div className="popup-line strong">
-              Profondeur réelle : {Math.max(0, (spotData.depth_chart_m + spotData.water_level_offset_m)).toFixed(1)} m
+              Profondeur réelle : {Math.max(0, (spotData.water_level_offset_m - spotData.depth_chart_m)).toFixed(1)} m
             </div>
             <small>Coef {spotData.tidal_coefficient} · à {fmtTime(spotData.at)}</small>
           </Popup>
