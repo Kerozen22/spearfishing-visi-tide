@@ -207,21 +207,20 @@ async def fetch_depth_emodnet(lat: float, lng: float) -> Optional[float]:
     """Profondeur carte (m, négative sous le zéro = convention française ZH)
     au point GPS via le WMS EMODnet Bathymetry. Gratuit, sans clé.
 
-    Précision : l'échantillonnage du WMS dépend de la taille de l'image
-    demandée pour une BBOX donnée. Avec une petite BBOX (rayon ~100-150m)
-    RENDUE EN GRANDE IMAGE (400x400 px), le WMS résout la grille bathymétrique
-    fine et la valeur au point central est stable et précise (résout chenaux
-    ~20-30m vs hauts-fonds ~2-4m). On valide la stabilité en relisant avec
-    une BBOX au rayon ~1.5x : si les deux valeurs convergent (écart < 40%),
-    on garde la valeur locale du point central. Retour : négatif sous le zéro.
+    Précision + robustesse : la grille EMODnet contient des cellules artefacts
+    (fausses "profondes" ~20-30 m) à proximité des îles et passages étroits mal
+    résolus. On échantillonne une grille ~5x5 (fenêtre ~900 m) en grande image
+    (résolution fine) et on prend la MÉDIANE TRONQUÉE : cela élimine les pics
+    isolés (artefacts) tout en gardant les vrais fonds régionaux (~2-8 m) et
+    les chenaux larges réels. Retour : négatif sous le zéro hydrographique.
     """
     # Cache par coordonnées arrondies (~50 m) : gain majeur en timeline.
     key = (round(lat * 2000), round(lng * 2000))
     if key in _DEPTH_CACHE:
         return _DEPTH_CACHE[key]
 
-    async def query_center(radius: float, px: int = 400) -> Optional[float]:
-        bbox = f"{lat-radius},{lng-radius},{lat+radius},{lng+radius}"
+    async def query_center(la: float, lo: float, radius: float = 0.002, px: int = 300) -> Optional[float]:
+        bbox = f"{la-radius},{lo-radius},{la+radius},{lo+radius}"
         url = (
             "https://ows.emodnet-bathymetry.eu/wms?service=WMS&version=1.3.0"
             "&request=GetFeatureInfo&layers=emodnet:mean"
@@ -241,17 +240,32 @@ async def fetch_depth_emodnet(lat: float, lng: float) -> Optional[float]:
         except Exception:  # noqa: BLE001
             return None
 
-    # Valeur locale (rayon ~80m) + valeur de contexte (rayon ~200m).
-    local = await query_center(0.0008, 400)   # ~80m de rayon, très local
-    context = await query_center(0.002, 400)  # ~200m de rayon, contexte
-
-    # Stabilisation : préfère la valeur locale, mais s'il y a conflit marqué
-    # avec le contexte (probable bruit de grille), on garde le locale qui est
-    # le plus représentatif du relief au point.
-    depth = local if local is not None else context
-    if depth is None:
+    # MÉTHODE ROBUSTE : la grille EMODnet contient des cellules artefacts
+    # (fausses "profondes" ~20-30 m) à proximité des îles / passages étroits
+    # mal résolus. Pour un usage chasse sous-marine, ces valeurs sont
+    # trompeuses. On échantillonne une petite grille ~5x5 (fenêtre ~900 m)
+    # et on prend la MÉDIANE, ce qui élimine les pics isolés tout en gardant
+    # les vrais fonds régionaux (~2-8 m) et les chenaux larges réels.
+    step = 0.0025  # ~280 m entre points sur la grille
+    offsets = [(di, dj) for di in (-2, -1, 0, 1, 2) for dj in (-2, -1, 0, 1, 2)]
+    # pondération : le point central compte double (plus représentatif du spot)
+    probes = [(offset, 2 if offset == (0, 0) else 1) for offset in offsets]
+    results = await asyncio.gather(
+        *(query_center(lat + di * step, lng + dj * step) for (di, dj), _ in probes))
+    vals = []
+    for (offset, w), v in zip(probes, results):
+        if v is not None:
+            vals += [v] * w
+    if not vals:
         _DEPTH_CACHE[key] = None
         return None
+
+    import statistics
+    vals.sort()
+    # coupe les 15% extrêmes de chaque côté (robuste aux artefacts isolés)
+    k = max(1, len(vals) // 6)
+    trimmed = vals[k:-k] or vals
+    depth = statistics.median(trimmed)
 
     result = round(-depth, 1)  # négatif = fond sous le zéro hydrographique
     _DEPTH_CACHE[key] = result
