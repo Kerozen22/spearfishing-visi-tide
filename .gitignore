@@ -5,10 +5,8 @@ __pycache__/
 *.egg-info/
 
 # Builds — SERVIS PAR FASTAPI (committé pour fiabilité Vercel)
-# On versionne dist/ pour que la fonction serverless le trouve toujours.
-# dist/
-# dist-ssr/
-# public/
+# On versionne dist/ racine; dist-ssr/ et frontend/dist sont parasitées.
+frontend/dist/
 
 # Logs
 *.log
