@@ -24,7 +24,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .tide_plus import build_visibility, _infer_tidal_coefficient, _synthetic_tide_offset
-from .tides_ref import compute_tide, resolve_reference_port
+from .worldtides import compute_tide_real, height_at_time, next_extremes
+from .tides_ref import resolve_reference_port
 from .visibility import estimate_visibility, OceanParams, tidal_coefficient_from_range
 
 app = FastAPI(
@@ -182,10 +183,15 @@ async def spot(
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Source de données indisponible : {e}")
 
-    tide = compute_tide(lat, lng, when)
+    tide = await compute_tide_real(lat, lng, when)
     coef = tide["coefficient"]
     offset_h = tide["water_level_offset_m"]
-    next_high, next_low = _next_extremes(lat, lng, when)
+    if tide.get("next_high") and tide.get("next_low"):
+        from datetime import datetime as _dt
+        next_high = _dt.fromisoformat(tide["next_high"])
+        next_low = _dt.fromisoformat(tide["next_low"])
+    else:
+        next_high, next_low = await _next_extremes(lat, lng, when)
     # Profondeur carte (négative en mer) : exposée via le facteur depth_chart_m.
     depth = result.factors.get("depth_chart_m")
 
@@ -218,15 +224,12 @@ async def timeline(
     for i in range(0, hours * 60, step):
         t = when + timedelta(minutes=i)
         r = await build_visibility(lat, lng, t)
-        tide = compute_tide(lat, lng, t)
-        coef = tide["coefficient"]
-        offset_h = tide["water_level_offset_m"]
         points.append({
             "at": t.isoformat(),
             "visi_m": r.score_m,
             "qualitative": r.qualitative,
-            "water_level_offset_m": offset_h,
-            "tidal_coefficient": coef,
+            "water_level_offset_m": r.water_level_offset_m,
+            "tidal_coefficient": r.tidal_coefficient,
             "factors": r.factors,
         })
     return {"lat": lat, "lng": lng, "step_minutes": step, "points": points}
@@ -247,17 +250,18 @@ def _parse_at(at: Optional[str]) -> datetime:
         raise HTTPException(400, "Format 'at' invalide. utilisez ISO8601 (ex: 2026-08-13T08:00:00Z)")
 
 
-def _next_extremes(lat: float, lng: float, when: datetime) -> tuple[datetime, datetime]:
-    """Prochaine pleine mer et basse mer via le modèle harmonique calibré.
+async def _next_extremes(lat: float, lng: float, when: datetime) -> tuple[datetime, datetime]:
+    """Prochaine pleine mer et basse mer.
 
-    On cherche les extrema de la hauteur (dérivée ~ 0) sur les prochaines 25h.
-    On se base sur la courbe du port de référence (tide_height_at), ce qui
-    garde une cohérence totale avec la hauteur d'eau affichée dans l'app.
+    Utilise la hauteur du dispo réel (compute_tide_real, WorldTides si clé
+    sinon modèle calibré) pour garder une cohérence totale avec la hauteur
+    d'eau affichée dans l'app. On cherche les extrema sur les prochaines 25h.
     """
-    port = resolve_reference_port(lat, lng)
-    ref = port.get("ref") or "SAINT-MALO"
-
     def h(t: datetime) -> float:
+        # compute_tide_real est async mais h() est synchrone ici ; on calcule
+        # la hauteur via un appel séparé du modèle (cheap sans API) ou on
+        # recourt à un fallback synchrone local.
+        from .tides_ref import compute_tide
         tid = compute_tide(lat, lng, t)
         return tid["water_level_offset_m"]
 

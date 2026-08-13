@@ -195,6 +195,9 @@ def compute_tide(lat: float, lng: float,
         "marnage_m": round(marn, 1),
         "water_level_offset_m": warp,
         "is_estimation": True,      # pas les valeurs officielles temps réel
+        "next_high": None,          # rempli par le dispo réel si présent
+        "next_low": None,
+        "source": "modèle calibré Saint-Malo",
     }
 
 

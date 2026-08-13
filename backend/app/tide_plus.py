@@ -25,7 +25,7 @@ import httpx
 
 from .visibility import OceanParams, estimate_visibility, VisibilityResult
 from .copernicus import fetch_spm_copernicus
-from .tides_ref import compute_tide
+from .worldtides import compute_tide_real, height_at_time, next_extremes
 
 OPENMETEO_BASE = "https://marine-api.open-meteo.com/v1/marine"
 
@@ -150,16 +150,16 @@ async def build_visibility(lat: float, lng: float,
     wind = _pick_at_hour(marine, when, "wind_speed_10m")
     cur = _pick_at_hour(marine, when, "ocean_current_velocity")
 
-    # --- Marée (modèle harmonique calibré sur le port de référence SHOM) ---
-    # Si un coefficient est fourni en override (tests) on le respecte
-    # sinon on fait le calcul complet (port de référence + coef + hauteur).
+    # --- Marée (WorldTides réel si clé, sinon modèle calibré Saint-Malo) ---
+    # Le fallback est automatique dans compute_tide_real : aucun risque de
+    # casser l'app si la clé est absente ou l'API indisponible.
     if api_override and "coef" in api_override:
         coef = api_override["coef"]
         marnage = api_override.get("marnage", 6.0)
         offset_h = api_override.get("water_offset", 0.5)
         tide_ref = "SAINT-MALO"
     else:
-        tide = compute_tide(lat, lng, when)
+        tide = await compute_tide_real(lat, lng, when)
         coef = tide["coefficient"]
         marnage = tide["marnage_m"]
         offset_h = tide["water_level_offset_m"]

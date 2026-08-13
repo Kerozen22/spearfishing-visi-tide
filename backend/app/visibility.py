@@ -99,6 +99,7 @@ class VisibilityResult:
     factors: dict                # détail des réductions par facteur (logique)
     explanation: list[str]       # phrases explicatives en français
     water_level_offset_m: float  # hauteur d'eau h(t) au point (marée)
+    tidal_coefficient: float     # coefficient de marée (20-120)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -318,6 +319,7 @@ def estimate_visibility(p: OceanParams, water_offset_m: float = 0.0) -> Visibili
         },
         explanation=expl,
         water_level_offset_m=round(water_offset_m, 2),
+        tidal_coefficient=round(p.tidal_coefficient, 1),
     )
 
 
