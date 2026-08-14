@@ -136,3 +136,32 @@ def test_inertia_zero_no_effect():
     """Sans historique de brassage, le facteur inertie est neutre (1.0)."""
     r = estimate_visibility(_ideal())
     assert r.factors["brassage_passé"] == 1.0
+
+
+# --- v4 : direction du vent (vent de mer vs vent de terre) ---
+
+def test_wind_direction_component():
+    """Le vent de mer pénalise la visi, le vent de terre et l'inconnu non."""
+    from app.visibility import component_wind_direction as cwd, _angle_diff
+    assert cwd(303, 310) < 1.0          # vent de large (mer) -> pénalité
+    assert cwd(130, 310) == 1.0         # vent de terre opposé -> neutre
+    assert cwd(310, 310) <= 0.8         # plein vent de mer -> forte pénalité
+    assert cwd(None, 310) == 1.0        # direction inconnue -> neutre
+    assert cwd(303, None) == 1.0
+    # _angle_diff minimal
+    assert _angle_diff(350, 10) == 20.0
+
+
+def test_wind_sea_degrades_visi_but_land_neutral():
+    """À vitesse identique, un vent de mer dégrade la visi vs un vent de terre."""
+    p_sea = _ideal()
+    p_sea.wind_direction_deg = 310.0
+    p_sea.ocean_sector_deg = 310.0
+    p_land = _ideal()
+    p_land.wind_direction_deg = 130.0   # opposé, vent de terre
+    p_land.ocean_sector_deg = 310.0
+    r_sea = estimate_visibility(p_sea)
+    r_land = estimate_visibility(p_land)
+    assert r_sea.score_m < r_land.score_m
+    assert r_sea.factors["vent_de_mer"] < 1.0
+    assert r_land.factors["vent_de_mer"] == 1.0

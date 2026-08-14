@@ -78,6 +78,16 @@ WATER_MIN_M = 0.8    # en dessous de cette hauteur d'eau, l'effet est max (déco
 DEPTH_ALLUVION_MIN = 4.0    # en dessous (haut-fond), plein impact
 DEPTH_ALLUVION_MAX = 25.0   # au-delà (tombant), impact houle fortement réduit
 
+# Direction du vent : secteur océanique "de mer" par défaut (large du secteur
+# chassé). En Bretagne Nord / Manche occidentale, la houle et le vent de large
+# arrivent du NW à l'Ouest (~280-330°). Valeur centrale ~310°.
+# Un vent soufflant DEPUIS ce secteur vers le point = vent de mer (fetch long,
+# pousse la houle, agite la côte -> visi dégradée). Vent de terre = abat la mer.
+OCEAN_SECTOR_DEFAULT_DEG = 310.0
+# Largeur angulaire (demi-angle, degrés) du secteur "de mer" franchement défavorable.
+WIND_SEA_HALF_WIDTH = 60.0   # un vent à ±60° du secteur large = défavorable
+WIND_LAND_DEG_DEG = 180.0    # l'exact opposé du vent de large = vent de terre net
+
 
 # ---------------------------------------------------------------------------
 # Structures
@@ -99,6 +109,13 @@ class OceanParams:
     tidal_coefficient: float     # 20-120 (coefficient de marée, France)
     tidal_current_ms: float      # m/s  (vitesse du courant de marée au point)
     tide_offset_minutes: float   # minutes avant/apres l'etale (negative = avant)
+    # Direction du vent (champs optionnels, donc placés après les obligatoires)
+    wind_direction_deg: Optional[float] = None  # degrés (0/360=N, 90=E), d'où vient le vent
+    # Orientation approximative du fetch océanique dominant (secteur "large").
+    # Le vent est "de mer" s'il souffle depuis ce secteur vers le point.
+    # Valeur = azimut (degrés) du centre du secteur océan ouvert (ex: Bretagne
+    # Nord -> ~310° NW). None = pas de direction connue, neutre.
+    ocean_sector_deg: Optional[float] = None
     # Courant général / hydrologie
     current_speed: float = 0.0   # m/s  (courant général/hydrodynamique)
     # Fond / sédiment (optionnel, valeur par défaut = sable fin)
@@ -212,6 +229,39 @@ def component_wind(wind_wave_height: float, wind_speed: float) -> float:
     return _reduction(wind, 0.15, 0.9)
 
 
+def _angle_diff(a: float, b: float) -> float:
+    """Différence angulaire minimale (degrés) entre deux azimuts [0,360)."""
+    d = abs((a - b) % 360)
+    return min(d, 360 - d)
+
+
+def component_wind_direction(wind_direction_deg: Optional[float],
+                             ocean_sector_deg: Optional[float]) -> float:
+    """Impact de la DIRECTION du vent (vent de mer vs vent de terre).
+
+    Le vent **de mer** (depuis l'océan ouvert vers la côte) a un long fetch :
+    il pousse la houle, entretient le clapot et remet les sédiments en
+    suspension près de la côte -> visi DÉGRADÉE (facteur < 1, jusqu'à -25%).
+
+    Le vent **de terre** (de l'intérieur vers la mer) abat la mer côtière et
+    calme la bande littorale -> visi plutôt NEUTRE/STABILISÉE.
+
+    Retour : facteur dans [0,1], 1 = direction neutre ou vent de terre,
+             < 1 = vent de mer défavorable (minimum ~0.75).
+    """
+    if wind_direction_deg is None or ocean_sector_deg is None:
+        return 1.0  # direction inconnue -> pas de pénalité
+    sea_deg = ocean_sector_deg % 360
+    diff = _angle_diff(wind_direction_deg, sea_deg)
+    if diff <= WIND_SEA_HALF_WIDTH:
+        # vent franchement de mer : pénalité d'autant plus forte que l'on est
+        # proche de l'axe du fetch
+        t = 1.0 - diff / WIND_SEA_HALF_WIDTH   # 1 au centre du secteur, 0 au bord
+        # facteur : 1 (bord) -> 0.75 (plein vent de mer)
+        return 1.0 - 0.25 * t
+    return 1.0
+
+
 def component_tide(tidal_coefficient: float, tidal_current_ms: float,
                    tide_offset_minutes: float) -> float:
     """Impact de la maree. Fort coefficient + forte vitesse de courant +
@@ -301,6 +351,8 @@ def estimate_visibility(p: OceanParams, water_offset_m: float = 0.0) -> Visibili
     r_wave = component_wave(p.swell_height, p.swell_period,
                             depth_m=p.depth_chart_m)
     r_wind = component_wind(p.wind_wave_height, p.wind_speed)
+    r_wind_dir = component_wind_direction(p.wind_direction_deg,
+                                          p.ocean_sector_deg)
 
     wave_drive = max(p.tidal_current_ms, (p.swell_height / max(p.swell_period, 0.1)))
     r_tide = component_tide(p.tidal_coefficient, p.tidal_current_ms, p.tide_offset_minutes)
@@ -328,8 +380,8 @@ def estimate_visibility(p: OceanParams, water_offset_m: float = 0.0) -> Visibili
     w = max(water_offset_m, 0.0)
     water_penalty = math.exp(-w / WATER_OK_M)          # 1 quand w=0, ~0 quand w grand
     water_factor = math.exp(-WATER_EFFECT_STR * water_penalty)
-    score = (VISI_MAX_REFERENCE * r_wave * r_wind * r_tide * r_current
-             * r_sediment * r_inertia * r_turbidity * water_factor)
+    score = (VISI_MAX_REFERENCE * r_wave * r_wind * r_wind_dir * r_tide
+             * r_current * r_sediment * r_inertia * r_turbidity * water_factor)
     score = _clamp(score, VISI_MIN_FLOOR, VISI_MAX_REFERENCE)
 
     # --- qualitatif diffuser ---
@@ -345,7 +397,8 @@ def estimate_visibility(p: OceanParams, water_offset_m: float = 0.0) -> Visibili
     # --- explications (garde les raisons les plus fortes) ---
     expl: list[str] = []
     weakest = sorted(
-        [("houle", r_wave), ("vent", r_wind), ("marée", r_tide),
+        [("houle", r_wave), ("vent (vitesse)", r_wind),
+         ("vent de mer", r_wind_dir), ("marée", r_tide),
          ("courant", r_current), ("fond/sédiment", r_sediment),
          ("brassage passé", r_inertia), ("turbidité", r_turbidity)],
         key=lambda kv: kv[1],
@@ -364,6 +417,9 @@ def estimate_visibility(p: OceanParams, water_offset_m: float = 0.0) -> Visibili
         factors={
             "houle": round(r_wave, 3),
             "vent": round(r_wind, 3),
+            "vent_direction_deg": (None if p.wind_direction_deg is None
+                                   else round(p.wind_direction_deg)),
+            "vent_de_mer": round(r_wind_dir, 3),
             "marée": round(r_tide, 3),
             "courant": round(r_current, 3),
             "sédiment": round(r_sediment, 3),

@@ -28,6 +28,10 @@ from .copernicus import fetch_spm_copernicus
 from .worldtides import compute_tide_real, height_at_time, next_extremes
 
 OPENMETEO_BASE = "https://marine-api.open-meteo.com/v1/marine"
+# Endpoint météo standard (fournit wind_direction_10m, absent de l'API marine).
+OPENMETEO_FORECAST_BASE = "https://api.open-meteo.com/v1/forecast"
+# Secteur océanique "de mer" par défaut (Breagne Nord / Manche : vent du NW-Ouest).
+DEFAULT_OCEAN_SECTOR_DEG = 310.0
 
 
 async def fetch_marine_data(lat: float, lng: float,
@@ -115,6 +119,30 @@ def _past_stirring(data: dict, when: datetime, depth_m: float) -> float:
 
 def _clamp_f(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
+
+
+async def _fetch_wind_direction(lat: float, lng: float,
+                                when: datetime) -> Optional[float]:
+    """Direction du vent (degrés, 0/360=N, d'où il vient) à l'heure donnée.
+
+    L'API marine d'Open-Meteo ne fournit pas wind_direction_10m ; on fait un
+    second appel à l'endpoint météo standard. En cas d'échec réseau, renvoie
+    None (le modèle de visi traite alors la direction comme inconnue/neutre).
+    """
+    params = {
+        "latitude": lat, "longitude": lng,
+        "hourly": "wind_direction_10m,wind_speed_10m",
+        "forecast_days": 3, "timezone": "UTC",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(OPENMETEO_FORECAST_BASE, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+        return _pick_at_hour(data, when, "wind_direction_10m") or None
+    except Exception as e:  # noqa: BLE001 - dégradation douce
+        print(f"[_fetch_wind_direction] échec, direction inconnue : {e}")
+        return None
 
 
 def _pick_at_hour(data: dict, when: datetime, field: str) -> float:
@@ -240,6 +268,8 @@ async def build_visibility(lat: float, lng: float,
         depth_chart_m=depth_m,
         turbidity_gL=turbidity,
         past_stirring=_past_stirring(marine, when, depth_m),
+        wind_direction_deg=await _fetch_wind_direction(lat, lng, when),
+        ocean_sector_deg=DEFAULT_OCEAN_SECTOR_DEG,
     )
     return estimate_visibility(params, water_offset_m=offset_h)
 
