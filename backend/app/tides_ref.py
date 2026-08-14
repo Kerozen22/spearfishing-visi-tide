@@ -50,10 +50,14 @@ _REF_MARNAGE = {
 }
 
 # Décalage de phase (heures) appliqué au modèle harmonique pour caler les
-# heures de pleine/basse mer sur les valeurs officielles de l'annuaire des
-# marées de Saint-Malo (ex. 14/08/2026 : BM 03h53, PM 09h15, BM 16h09,
-# PM 21h28). Calibration validée sur 14-17/08 (écart < 25 min).
-_PHASE_OFFSET_H = 3.5
+# heures de pleine/basse mer sur les valeurs OFFICIELLES de l'annuaire des
+# marées de Saint-Malo (exprimées en HEURE LÉGALE, UTC+2 en été).
+#   PM officielle 14/08 = 09h15 LOCALE = 07h15 UTC.
+#   PM du modèle brut (tide_coeff) = 05h45 UTC.
+#   => décalage = 07h15 - 05h45 = 1.5 h (le reste de phase était une
+#      sur-correction de 2 h : les heures de l'annuaire avaient été prises
+#      pour de l'UTC alors qu'elles sont locales).
+_PHASE_OFFSET_H = 1.5
 
 # Marnage par port DE RÉFÉRENCE -> clé dans _REF_MARNAGE (normalisée).
 def _marnage_for(ref_cst: str) -> tuple[float, float]:
