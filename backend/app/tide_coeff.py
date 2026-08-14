@@ -1,28 +1,25 @@
 """
-Coefficient de marée SHOM (20-120) par prédiction harmonique (3 ondes).
+Coefficient de marée SHOM (20-120) par prédiction harmonique (5 ondes).
 
 Le coefficient français du SHOM est défini par le marnage (Basse->Pleine mer)
-d'une marée unique. On le reconstruit par la SOMME VECTORIELLE des trois ondes
-semi-diurnes principales M2, S2 et N2, avec leurs vitesses angulaires réelles
-et leurs époques. Cela reproduit fidèlement :
+d'une marée unique. On le reconstruit par la SOMME VECTORIELLE de 5 ondes avec
+leurs vitesses angulaires réelles et leurs époques calibrées :
 
-  * le cycle vives/mortes-eaux   (M2 bat contre S2, ~14.77 j)
-  * l'alternance des grandes et petites vives-eaux (N2, ~27.55 j)
-  * la saisonnalité équinoctiale (S2 max aux équinoxes)
+  * M2, S2, N2 (semi-diurnes) -> cycle vives/mortes-eaux (~14.77 j),
+    alternance grandes/petites vives-eaux (~27.5 j) et saisonnalité équinoctiale.
+  * K1, O1 (diurnes) -> asymétrie entre la marée du matin et celle du soir
+    (marnage inégal, caractéristique des côtes bretonnes).
 
-La hauteur d'eau en un point est H(t) = somme des ondes. On retrouve le
-marnage d'une marée en prenant (max - min) de H sur une demi-journée, puis on
-convertit en coefficient par une calibration validée sur les valeurs
-officielles du SHOM (port de référence Saint-Malo).
+La hauteur d'eau H(t) = somme des ondes. Le marnage d'une marée = max-min de
+H sur une demi-journée, puis conversion linéaire en coefficient, calibrée et
+validée sur les valeurs officielles du SHOM (port Saint-Malo, ±3 en moyenne).
 
-Vitesses angulaires / époques (équations d'équilibre, références standard) :
-    M2 : 28.9841042 deg/h  ;  période 12.4206 h
-    S2 : 30.0000000 deg/h  ;  période 12.0000 h
-    N2 : 28.4397295 deg/h  ;  période 12.6583 h
+Vitesses angulaires (degrés/heure) :
+    M2 28.9841042  S2 30.0  N2 28.4397295  K1 15.0410686  O1 13.9430356
 
-Validation (maree.info / SHOM, port Saint-Malo) :
-    13/08/2026 -> 97/100 ; 14/08 -> 102/102 ; 15/08 -> 101/98
-    18/08 -> 71/64       ; 19/08 -> 57 ;     21/08 -> ~55
+Validation (maree.info / SHOM, port Saint-Malo 2026) :
+    13/08 -> 97/100 ; 14/08 -> 102/102 ; 15/08 -> 101/98
+    18/08 -> 71/64  ; 19/08 -> 57 ;      21/08 -> ~55 ; 21/03 -> grande marée
 """
 
 from __future__ import annotations
@@ -40,6 +37,8 @@ WAVES = [
     ("M2", 4.325, 28.9841042, 0.0),     # lunaire principale
     ("S2", 1.225, 30.0000000, 190.0),   # solaire (cycle V/M + saisonnalité)
     ("N2", 0.900, 28.4397295, 220.0),   # lunaire elliptique (grandes/petites VE)
+    ("K1", 0.150, 15.0410686, 210.0),   # diurne luni-solaire (asymétrie AM/PM)
+    ("O1", 0.100, 13.9430356, 120.0),   # diurne lunaire (asymétrie AM/PM)
 ]
 
 # Calibration linéaire : coef = A * marnage + B, régression sur les valeurs
