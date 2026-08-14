@@ -144,6 +144,8 @@ export default function App() {
   // Vue du popup = combinaison du spot cliqué (fond fixe) et de l'heure
   // courante de la timeline (marée, visi, coef qui varient avec le temps).
   // Le fond (depth_chart_m) est une donnée de la carte, indépendante de l'heure.
+  // On surécrit aussi `factors` depuis currentPoint : il porte la profondeur
+  // réelle (depth_reelle_m), la hauteur d'eau, etc. qui VARIENT avec l'heure.
   const popupView = spotData && currentPoint ? {
     ...spotData,
     water_level_offset_m: currentPoint.water_level_offset_m,
@@ -152,6 +154,7 @@ export default function App() {
     color_hex: currentPoint.color_hex,
     tidal_coefficient: currentPoint.tidal_coefficient,
     at: currentPoint.at,
+    factors: currentPoint.factors || spotData.factors,
   } : spotData
 
   async function onMapClick(evt) {
