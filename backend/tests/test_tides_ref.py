@@ -54,11 +54,11 @@ def test_water_level_within_marnage():
     msl = ve / 2.0
     t0 = datetime(2026, 8, 13, 0, 0, tzinfo=timezone.utc)
     heights = [tide_height_at(ref, coef, t0 + timedelta(minutes=m)) for m in range(0, 12 * 60, 15)]
-    # Aucune hauteur négative (jamais sous le zéro hydrographique).
-    assert all(h >= 0.0 for h in heights)
     # La hauteur reste dans un intervalle ~centré sur MSL, borné par
-    # MSL ± marnage/2 (tolérance d'arrondi).
+    # MSL ± marnage/2 (tolérance d'arrondi). Peut être légèrement négative
+    # à la basse mer des grandes marées (champ macro-tidal) : pas de clamp.
     assert all(h <= msl + marn / 2.0 + 0.01 for h in heights)
+    assert all(h >= msl - marn / 2.0 - 0.01 for h in heights)
     # Le MARNAGE observé (PM - BM sur la courbe) vaut bien celui du coefficient.
     observed = max(heights) - min(heights)
     assert abs(observed - marn) < 0.5

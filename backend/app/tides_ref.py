@@ -164,7 +164,12 @@ def tide_height_at(ref_cst: str, coef: float, when: datetime) -> float:
     phase_shift = (lon0 + 90.0) * math.pi / 180.0
     phi = t_rad + phase_shift
     h = msl + (marn / 2.0) * math.cos(phi)
-    return round(max(0.0, h), 2)
+    # NB: on NE CLAMPE PAS à 0. Autour de la basse mer des grandes marées
+    # (marnage/2 > MSL), la valeur peut devenir légèrement négative : c'est
+    # physiquement honnête (la mer descend sous le zéro hydrographique dans
+    # les champs macro-tidaux type Saint-Malo). Un clamp brutal créerait un
+    # plateau à "0.00 m" pendant plusieurs heures, trompeur.
+    return round(h, 2)
 
 
 def _marnage_from_coef(ref_cst: str, coef: float) -> float:
