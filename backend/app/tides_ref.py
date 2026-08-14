@@ -133,42 +133,58 @@ def _loc_of_ref(ref_cst: str) -> tuple[float, float]:
     return 48.65, -2.02
 
 
+def _demi_marnage_harmonic(when: datetime) -> tuple[float, float]:
+    """Min et max de la hauteur harmonique sur la marée en cours (±7.5h).
+
+    On réutilise le modèle harmonique M2+S2+N2+K1+O1 (tide_coeff), calibré
+    sur Saint-Malo : il donne les VRAIES phases (heures de pleine/basse mer
+    qui se décalent de ~50 min/jour). La valeur en un point est normalisée
+    par cette amplitude pour préserver la forme de la marée réelle.
+    """
+    from .tide_coeff import _tide_height, _hours_since_epoch
+    h0 = _hours_since_epoch(when)
+    lo, hi = 1e9, -1e9
+    step = 6.0 / 60.0  # pas de 6 min pour une précision correcte
+    for i in range(int(15.0 / step) + 1):
+        y = _tide_height(h0 - 7.5 + i * step)
+        if y < lo:
+            lo = y
+        if y > hi:
+            hi = y
+    return lo, hi
+
+
 def tide_height_at(ref_cst: str, coef: float, when: datetime) -> float:
     """Hauteur d'eau (m) au-dessus du zéro hydrographique à l'instant t.
 
-    Courbe semi-diurne SINUSOÏDALE CENTRÉE sur le niveau moyen de la mer
-    (MSL) :  h(t) = MSL + (marnage/2) * cos(phi).
+    On calcule la FORME de la marée via le modèle harmonique (phases réelles
+    -> heures de PM/BM correctes, décalées de ~50 min/jour) puis on la
+    re-dimensionne sur le marnage du coefficient et le niveau moyen du port :
 
-    Cette formulation est physiquement correcte ET relie la hauteur au
-    coefficient :
-      - La pleine mer vaut  MSL + marnage/2, la basse mer MSL - marnage/2.
-      - Le marnage (différence PM-BM) est directement dérivé du coefficient :
-        + coefficient = amplitude (marnage) plus grande.
-      - La basse mer n'est JAMAIS faussement écrasée à 0 : plus le
-        coefficient diminue, plus la mer "reste haute" à la BM (cohérent).
-    MSL = niveau moyen de la mer ≈ mi-marnage de vive-eau (VE/2). Ex:
-    Saint-Malo VE=11.8 -> MSL≈5.9 m ; Brest VE=6.0 -> MSL≈3.0 m.
+        h(t) = MSL + (marnage/2) * forme_normalisée(t)
+
+    où forme_normalisée ∈ [-1, 1] reproduit la vraie courbe harmonique.
+    • La pleine mer ~ MSL + marnage/2, la basse mer ~ MSL - marnage/2.
+    • Le marnage (PM-BM) est dérivé du coefficient : corrélation correcte.
+    • Les heures de PM/BM correspondent au régime réel (feuille la façade
+      atlantique avec le décalage journalier M2 ~ +50 min/jour).
+    MSL = niveau moyen de la mer ≈ mi-marnage de vive-eau (VE/2).
     """
+    from .tide_coeff import _tide_height, _hours_since_epoch
     marn = _marnage_from_coef(ref_cst, coef)
     _me, ve = _marnage_for(ref_cst)
     msl = ve / 2.0
 
-    # Phase : période M2 = 12.4206012 h. Décalage spatial par longitude.
-    P_M2_H = 12.4206012
-    _, lon0 = _loc_of_ref(ref_cst)
-    t_rad = (when.timestamp() / (P_M2_H * 3600.0)) * 2 * math.pi
-    # On approxime la phase au port : +90° de phase par ~30° de longitude
-    # vers l'ouest (ordre de grandeur). Le zéro (basse mer) est aligné par un
-    # décalage empirique ; on ajuste pour que la PM suive grossièrement le
-    # cycle de la baie de Saint-Malo.
-    phase_shift = (lon0 + 90.0) * math.pi / 180.0
-    phi = t_rad + phase_shift
-    h = msl + (marn / 2.0) * math.cos(phi)
+    lo, hi = _demi_marnage_harmonic(when)
+    amp = (hi - lo) / 2.0
+    if amp <= 0:
+        amp = 1.0
+    form = (_tide_height(_hours_since_epoch(when)) - (lo + hi) / 2.0) / amp  # [-1, 1]
+    h = msl + (marn / 2.0) * form
     # NB: on NE CLAMPE PAS à 0. Autour de la basse mer des grandes marées
     # (marnage/2 > MSL), la valeur peut devenir légèrement négative : c'est
     # physiquement honnête (la mer descend sous le zéro hydrographique dans
-    # les champs macro-tidaux type Saint-Malo). Un clamp brutal créerait un
-    # plateau à "0.00 m" pendant plusieurs heures, trompeur.
+    # les champs macro-tidaux type Saint-Malo).
     return round(h, 2)
 
 
