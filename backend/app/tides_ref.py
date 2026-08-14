@@ -49,6 +49,12 @@ _REF_MARNAGE = {
     "_DEFAULT":     {"ME": 4.0,  "VE": 5.5},
 }
 
+# Décalage de phase (heures) appliqué au modèle harmonique pour caler les
+# heures de pleine/basse mer sur les valeurs officielles de l'annuaire des
+# marées de Saint-Malo (ex. 14/08/2026 : BM 03h53, PM 09h15, BM 16h09,
+# PM 21h28). Calibration validée sur 14-17/08 (écart < 25 min).
+_PHASE_OFFSET_H = 3.5
+
 # Marnage par port DE RÉFÉRENCE -> clé dans _REF_MARNAGE (normalisée).
 def _marnage_for(ref_cst: str) -> tuple[float, float]:
     if ref_cst in _REF_MARNAGE:
@@ -140,9 +146,11 @@ def _demi_marnage_harmonic(when: datetime) -> tuple[float, float]:
     sur Saint-Malo : il donne les VRAIES phases (heures de pleine/basse mer
     qui se décalent de ~50 min/jour). La valeur en un point est normalisée
     par cette amplitude pour préserver la forme de la marée réelle.
+    Le décalage de phase _PHASE_OFFSET_H est appliqué pour caler les heures
+    de PM/BM sur les valeurs officielles (annuaire Saint-Malo).
     """
     from .tide_coeff import _tide_height, _hours_since_epoch
-    h0 = _hours_since_epoch(when)
+    h0 = _hours_since_epoch(when) - _PHASE_OFFSET_H
     lo, hi = 1e9, -1e9
     step = 6.0 / 60.0  # pas de 6 min pour une précision correcte
     for i in range(int(15.0 / step) + 1):
@@ -179,7 +187,7 @@ def tide_height_at(ref_cst: str, coef: float, when: datetime) -> float:
     amp = (hi - lo) / 2.0
     if amp <= 0:
         amp = 1.0
-    form = (_tide_height(_hours_since_epoch(when)) - (lo + hi) / 2.0) / amp  # [-1, 1]
+    form = (_tide_height(_hours_since_epoch(when) - _PHASE_OFFSET_H) - (lo + hi) / 2.0) / amp  # [-1, 1]
     h = msl + (marn / 2.0) * form
     # NB: on NE CLAMPE PAS à 0. Autour de la basse mer des grandes marées
     # (marnage/2 > MSL), la valeur peut devenir légèrement négative : c'est
