@@ -13,6 +13,7 @@ Lancement :
 from __future__ import annotations
 
 import os
+import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -225,10 +226,14 @@ async def timeline(
     la date choisie par le sélecteur de jour de la fiche spot.
     """
     when = _parse_at(start).replace(minute=0, second=0, microsecond=0)
+    # Génère les heures demandées, puis calcule les 24 points EN PARALLÈLE
+    # (asyncio.gather). Les caches TTL (Open-Meteo, EMODnet) font que les
+    # requêtes réseau ne partent qu'une fois ; la génération parallèle évite
+    # un coût de latence réseau × 24.
+    times = [when + timedelta(minutes=i) for i in range(0, hours * 60, step)]
+    results = await asyncio.gather(*(build_visibility(lat, lng, t) for t in times))
     points = []
-    for i in range(0, hours * 60, step):
-        t = when + timedelta(minutes=i)
-        r = await build_visibility(lat, lng, t)
+    for t, r in zip(times, results):
         points.append({
             "at": t.isoformat(),
             "visi_m": r.score_m,

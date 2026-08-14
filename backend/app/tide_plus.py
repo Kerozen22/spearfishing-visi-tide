@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import math
 import re
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -64,8 +65,17 @@ async def fetch_marine_data(lat: float, lng: float,
 
     Retourne un dict avec les séries horaires + unités. En cas d'échec
     réseau, renvoie des valeurs par défaut documentées (graceful degrade).
+
+    Performance : une seule requête ramène 3 jours de prévision. On met en
+    cache (TTL 30 min) par coordonnées arrondies, pour que la timeline qui
+    appelle ceci 24 fois ne fasse qu'1 seule requête réseau au lieu de 24.
     """
     when = when or datetime.now(timezone.utc)
+    key = (round(lat, 2), round(lng, 2))  # ~10 km de résolution, cache stable
+    now = time.monotonic()
+    hit = _MARINE_CACHE.get(key)
+    if hit and (now - hit[0]) < MARINE_CACHE_TTL:
+        return hit[1]
     # Open-Meteo travaille en heures UTC; on prend 3 jours de prévision.
     params = {
         "latitude": lat,
@@ -83,7 +93,9 @@ async def fetch_marine_data(lat: float, lng: float,
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(OPENMETEO_BASE, params=params)
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+        _MARINE_CACHE[key] = (now, data)
+        return data
     except Exception as e:  # noqa: BLE001 - degrade gracefully.
         print(f"[fetch_marine_data] échec, valeurs par défaut : {e}")
         return _empty_marine()
@@ -151,7 +163,16 @@ async def _fetch_wind_direction(lat: float, lng: float,
     L'API marine d'Open-Meteo ne fournit pas wind_direction_10m ; on fait un
     second appel à l'endpoint météo standard. En cas d'échec réseau, renvoie
     None (le modèle de visi traite alors la direction comme inconnue/neutre).
+
+    Performance : l'endpoint ramène 3 jours de prévision. On met en cache
+    (TTL 30 min) la direction par coordonnées, pour que la timeline n'appelle
+    ceci qu'une seule fois au lieu de 24. `when` ne sert qu'à choisir l'heure.
     """
+    key = (round(lat, 2), round(lng, 2))
+    now = time.monotonic()
+    hit = _WIND_DIR_CACHE.get(key)
+    if hit and (now - hit[0]) < WIND_DIR_CACHE_TTL:
+        return hit[1]
     params = {
         "latitude": lat, "longitude": lng,
         "hourly": "wind_direction_10m,wind_speed_10m",
@@ -162,7 +183,9 @@ async def _fetch_wind_direction(lat: float, lng: float,
             resp = await client.get(OPENMETEO_FORECAST_BASE, params=params)
             resp.raise_for_status()
             data = resp.json()
-        return _pick_at_hour(data, when, "wind_direction_10m") or None
+        val = _pick_at_hour(data, when, "wind_direction_10m") or None
+        _WIND_DIR_CACHE[key] = (now, val)
+        return val
     except Exception as e:  # noqa: BLE001 - dégradation douce
         print(f"[_fetch_wind_direction] échec, direction inconnue : {e}")
         return None
@@ -237,6 +260,12 @@ async def build_visibility(lat: float, lng: float,
             marine (dict), coef, marnage.
     """
     when = when or datetime.now(timezone.utc)
+    # PERFORMANCE : la profondeur EMODnet est LE facteur lent (2-8s). On la
+    # lance en tâche de fond EN PARALLÈLE des autres fetchs réseau (Open-Meteo,
+    # marée) pour que le temps total ~ max() au lieu d'une somme séquentielle.
+    # fetch_depth_emodnet gère son cache + lock : safe en concurrence.
+    depth_task = asyncio.create_task(fetch_depth_emodnet(lat, lng))
+
     raw = api_override.get("marine") if api_override else None
     marine = raw or await fetch_marine_data(lat, lng, when)
 
@@ -265,8 +294,9 @@ async def build_visibility(lat: float, lng: float,
     # Profondeur carte au point (EMODnet, gratuit, pour le proxy turbidité).
     if api_override and api_override.get("depth") is not None:
         depth_m = api_override["depth"]
+        depth_task.cancel()
     else:
-        depth_m = await fetch_depth_emodnet(lat, lng)
+        depth_m = await depth_task
     if depth_m is None:
         depth_m = 6.0  # valeur par défaut si WMS indisponible
 
@@ -301,6 +331,19 @@ async def build_visibility(lat: float, lng: float,
 # La profondeur ne change pas avec le temps : la timeline interroge ~20
 # points au même endroit, on évite donc 20 * 9 = 180 requêtes WMS répétées.
 _DEPTH_CACHE: dict[tuple[int, int], Optional[float]] = {}
+# Locks (par coordonnée) pour sérialiser le 1er calcul de profondeur : évite
+# que 24 points parallèles déclenchent 24 x 25 requêtes WMS simultanées.
+_DEPTH_CACHE_LOCKS: dict[tuple[int, int], asyncio.Lock] = {}
+
+# Cache TTL des données météo/ocean (Open-Meteo). Une seule requête ramène
+# 3 jours de prévision : la timeline qui appelle 24 fois ne doit faire qu'1
+# seule requête réseau par endpoint. Valeur stockée = (timestamp, données).
+MARINE_CACHE_TTL = 30 * 60      # 30 minutes
+_MARINE_CACHE: dict[tuple[float, float], tuple[float, object]] = {}
+
+# Cache TTL de la direction du vent (endpoint météo standard, 2e appel HTTP).
+WIND_DIR_CACHE_TTL = 30 * 60
+_WIND_DIR_CACHE: dict[tuple[float, float], tuple[float, Optional[float]]] = {}
 
 
 async def fetch_depth_emodnet(lat: float, lng: float) -> Optional[float]:
@@ -325,62 +368,88 @@ async def fetch_depth_emodnet(lat: float, lng: float) -> Optional[float]:
     sur quelques spots pour dresser une table de calibration régionale, et
     fusionner avec la médiane (ex: bi-moyenne min/med pondérée par district).
     """
-    # Cache par coordonnées arrondies (~50 m) : gain majeur en timeline.
-    key = (round(lat * 2000), round(lng * 2000))
+    # Cache par coordonnées arrondies (~210 m) : gain majeur en timeline.
+    # Res. 500 (~210m) plutôt que 2000 (~50m) : cliquer à <200m d'un point
+    # déjà chargé réutilise la profondeur au lieu de relancer 25 requêtes WMS.
+    key = (round(lat * 500), round(lng * 500))
     if key in _DEPTH_CACHE:
         return _DEPTH_CACHE[key]
+    # IMPORTANT (perf) : sans lock, quand la timeline lance 24 points en
+    # parallèle, chaque point appelle fetch_depth_emodnet au même instant ->
+    # jusqu'à 24 x 25 = 600 requêtes WMS EMODnet simultanées -> throttling
+    # massif (~28s). On sérialise le premier calcul par zone avec un lock :
+    # seuls les points qui attendent réutilisent le cache une fois rempli.
+    lock = _DEPTH_CACHE_LOCKS.setdefault(key, asyncio.Lock())
+    async with lock:
+        # Double-check après attente du lock : un autre a pu remplir le cache.
+        if key in _DEPTH_CACHE:
+            return _DEPTH_CACHE[key]
 
-    async def query_center(la: float, lo: float, radius: float = 0.002, px: int = 300) -> Optional[float]:
-        bbox = f"{la-radius},{lo-radius},{la+radius},{lo+radius}"
-        url = (
-            "https://ows.emodnet-bathymetry.eu/wms?service=WMS&version=1.3.0"
-            "&request=GetFeatureInfo&layers=emodnet:mean"
-            f"&bbox={bbox}&width={px}&height={px}&query_layers=emodnet:mean"
-            f"&x={px//2}&y={px//2}&info_format=text/plain&crs=EPSG:4326"
-        )
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get(url)
-            if resp.status_code != 200:
+        async def query_center(la: float, lo: float, radius: float = 0.0005, px: int = 300) -> Optional[float]:
+            bbox = f"{la-radius},{lo-radius},{la+radius},{lo+radius}"
+            # NB: GetFeatureInfo au pixel central d'une image rendue de taille px.
+            # px=300 rend une grande image mais le pixel lu correspond au centre
+            # de la bbox (fiable). Le RADIUS (taille de la bbox) est le vrai
+            # facteur de rapidité d'EMODnet : bbox ~200m (0.0005°) au lieu de
+            # ~800m divise le temps de rendu par ~3 sans changer la valeur lue
+            # (le pixel central de chaque sous-cellule est le même point).
+            url = (
+                "https://ows.emodnet-bathymetry.eu/wms?service=WMS&version=1.3.0"
+                "&request=GetFeatureInfo&layers=emodnet:mean"
+                f"&bbox={bbox}&width={px}&height={px}&query_layers=emodnet:mean"
+                f"&x={px//2}&y={px//2}&info_format=text/plain&crs=EPSG:4326"
+            )
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get(url)
+                if resp.status_code != 200:
+                    return None
+                m = re.search(r"Depth\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)", resp.text)
+                if not m:
+                    return None
+                val = abs(float(m.group(1)))
+                return val if 0 < val < 300 else None
+            except Exception:  # noqa: BLE001
                 return None
-            m = re.search(r"Depth\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)", resp.text)
-            if not m:
-                return None
-            val = abs(float(m.group(1)))
-            return val if 0 < val < 300 else None
-        except Exception:  # noqa: BLE001
+
+        # MÉTHODE ROBUSTE : la grille EMODnet contient des cellules artefacts
+        # (fausses "profondes" ~20-30 m) à proximité des îles / passages étroits
+        # mal résolus. Pour un usage chasse sous-marine, ces valeurs sont
+        # trompeuses. On échantillonne une grille ~5x5 (fenêtre ~900 m) et on
+        # prend la MÉDIANE TRONQUÉE pondérée, ce qui élimine les pics isolés
+        # tout en gardant les vrais fonds régionaux (~2-8 m) et les chenaux
+        # larges réels. (Grille réduite 3x3 dégradait trop la précision.)
+        step = 0.0025  # ~280 m entre points sur la grille
+        offsets = [(di, dj) for di in (-2, -1, 0, 1, 2) for dj in (-2, -1, 0, 1, 2)]
+        # pondération : le point central compte double.
+        probes = [(offset, 2 if offset == (0, 0) else 1) for offset in offsets]
+        results = await asyncio.gather(
+            *(query_center(lat + di * step, lng + dj * step) for (di, dj), _ in probes))
+        vals = []
+        for (offset, w), v in zip(probes, results):
+            if v is not None:
+                vals += [v] * w
+        if not vals:
+            _DEPTH_CACHE[key] = None
             return None
 
-    # MÉTHODE ROBUSTE : la grille EMODnet contient des cellules artefacts
-    # (fausses "profondes" ~20-30 m) à proximité des îles / passages étroits
-    # mal résolus. Pour un usage chasse sous-marine, ces valeurs sont
-    # trompeuses. On échantillonne une petite grille ~5x5 (fenêtre ~900 m)
-    # et on prend la MÉDIANE, ce qui élimine les pics isolés tout en gardant
-    # les vrais fonds régionaux (~2-8 m) et les chenaux larges réels.
-    step = 0.0025  # ~280 m entre points sur la grille
-    offsets = [(di, dj) for di in (-2, -1, 0, 1, 2) for dj in (-2, -1, 0, 1, 2)]
-    # pondération : le point central compte double (plus représentatif du spot)
-    probes = [(offset, 2 if offset == (0, 0) else 1) for offset in offsets]
-    results = await asyncio.gather(
-        *(query_center(lat + di * step, lng + dj * step) for (di, dj), _ in probes))
-    vals = []
-    for (offset, w), v in zip(probes, results):
-        if v is not None:
-            vals += [v] * w
-    if not vals:
-        _DEPTH_CACHE[key] = None
-        return None
+        import statistics
+        vals.sort()
+        k = max(1, len(vals) // 6)
+        trimmed = vals[k:-k] or vals
+        depth = statistics.median(trimmed)
 
-    import statistics
-    vals.sort()
-    # coupe les 15% extrêmes de chaque côté (robuste aux artefacts isolés)
-    k = max(1, len(vals) // 6)
-    trimmed = vals[k:-k] or vals
-    depth = statistics.median(trimmed)
-
-    result = round(-depth, 1)  # négatif = fond sous le zéro hydrographique
-    _DEPTH_CACHE[key] = result
-    return result
+        result = round(-depth, 1)  # négatif = fond sous le zéro hydrographique
+        # Pré-remplissage spatial : on propage la profondeur aux clés voisines
+        # (grille ~9x9 de ~210m = ~1.9km). Ainsi, après avoir chargé une zone
+        # (timeline ou clic), tous les points proches réutilisent le cache
+        # instantanément au lieu de relancer 25 requêtes WMS EMODnet.
+        base_i, base_j = round(lat * 500), round(lng * 500)
+        for di in range(-4, 5):
+            for dj in range(-4, 5):
+                _DEPTH_CACHE.setdefault((base_i + di, base_j + dj), result)
+        _DEPTH_CACHE[key] = result
+        return result
 
 
 def _synthetic_tide_offset(lat: float, lng: float,
