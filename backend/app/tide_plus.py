@@ -313,6 +313,17 @@ async def fetch_depth_emodnet(lat: float, lng: float) -> Optional[float]:
     (résolution fine) et on prend la MÉDIANE TRONQUÉE : cela élimine les pics
     isolés (artefacts) tout en gardant les vrais fonds régionaux (~2-8 m) et
     les chenaux larges réels. Retour : négatif sous le zéro hydrographique.
+
+    LIMITATION CONNUE (décision produit du 14/08/2026) : autour des îles et
+    hauts-fonds étroits, le raster global (~1 km) ne résout pas le plateau
+    rocheux et la MEDIANE capture le chenal ADJACENT -> surestimation forte
+    (ex: Hébihens ~4m sondés SHOM vs ~32m renvoyés). Le min de la fenêtre
+    retrouve bien le haut-fond (3.6m) mais crée des faux hauts-fonds dans les
+    chenaux (artefacts). Sans données terrain de calibration, la médiane a été
+    jugée la moins mauvaise (cohérente dans les chenaux réels). Pour corriger
+    proprement : fournir des fonds réels mesurés (GPS + bathymétrie plongeur)
+    sur quelques spots pour dresser une table de calibration régionale, et
+    fusionner avec la médiane (ex: bi-moyenne min/med pondérée par district).
     """
     # Cache par coordonnées arrondies (~50 m) : gain majeur en timeline.
     key = (round(lat * 2000), round(lng * 2000))
