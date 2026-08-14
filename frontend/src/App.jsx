@@ -274,7 +274,9 @@ export default function App() {
             </div>
             <div className="stat">
               <span className="stat-value" style={{ color: '#7dd3fc' }}>
-                {Math.max(0, popupView.water_level_offset_m - popupView.depth_chart_m).toFixed(1)} m
+                {popupView.factors?.depth_reelle_m
+                  ? popupView.factors.depth_reelle_m.toFixed(1)
+                  : (popupView.water_level_offset_m + Math.abs(popupView.depth_chart_m || 0)).toFixed(1)} m
               </span>
               <span className="stat-label">Prof. réelle</span>
             </div>
