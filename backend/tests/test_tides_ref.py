@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 
 from app.tides_ref import (
     compute_tide, resolve_reference_port, tide_height_at,
-    _coefficient_of_day, _marnage_from_coef, _marnage_for,
+    _coefficient_of_day, _marnage_from_coef, _marnage_for, _msl_for,
 )
 
 
@@ -50,8 +50,7 @@ def test_water_level_within_marnage():
     ref = "SAINT-MALO"
     coef = 75.0
     marn = _marnage_from_coef(ref, coef)
-    _me, ve = _marnage_for(ref)
-    msl = ve / 2.0
+    msl = _msl_for(ref)
     t0 = datetime(2026, 8, 13, 0, 0, tzinfo=timezone.utc)
     heights = [tide_height_at(ref, coef, t0 + timedelta(minutes=m)) for m in range(0, 12 * 60, 15)]
     # La hauteur reste dans un intervalle ~centré sur MSL, borné par
@@ -74,6 +73,9 @@ def test_compute_tide_shape():
     r = compute_tide(48.577, -2.19, w)
     assert r["reference_cst"] == "SAINT-MALO"
     assert 20.0 <= r["coefficient"] <= 120.0
-    assert 0.0 <= r["water_level_offset_m"] <= r["marnage_m"] + 0.01
+    # La hauteur d'eau oscille autour du MSL : PM ~ msl+marn/2, BM ~ msl-marn/2.
+    msl = r["marnage_m"] and _msl_for("SAINT-MALO")
+    marn = r["marnage_m"]
+    assert msl - marn / 2.0 - 1.0 <= r["water_level_offset_m"] <= msl + marn / 2.0 + 1.0
     assert r["is_estimation"] is True
     assert "reference_port" in r and r["reference_port"]

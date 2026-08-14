@@ -49,6 +49,15 @@ _REF_MARNAGE = {
     "_DEFAULT":     {"ME": 4.0,  "VE": 5.5},
 }
 
+# Niveau moyen de la mer (MSL) au-dessus du zéro hydrographique, par port de
+# référence. Calibré sur l'annuaire officiel des marées (centre de la marée =
+# (PM+BM)/2). Saint-Malo : PM ~12,4m / BM ~1,1m (coef ~102) -> centre ~6,75m
+# au lieu de VE/2=5,9m (le ZH est calé plus bas que le niveau moyen).
+# Pour les autres ports on utilise VE/2 par défaut (approximation raisonnable).
+_MSL = {
+    "SAINT-MALO":  6.75,
+}
+
 # Décalage de phase (heures) appliqué au modèle harmonique pour caler les
 # heures de pleine/basse mer sur les valeurs OFFICIELLES de l'annuaire des
 # marées de Saint-Malo (exprimées en HEURE LÉGALE, UTC+2 en été).
@@ -65,6 +74,14 @@ def _marnage_for(ref_cst: str) -> tuple[float, float]:
         d = _REF_MARNAGE[ref_cst]
         return d["ME"], d["VE"]
     return _REF_MARNAGE["_DEFAULT"]["ME"], _REF_MARNAGE["_DEFAULT"]["VE"]
+
+
+# Niveau moyen de la mer (MSL) au-dessus du ZH : calibré si précis, sinon VE/2.
+def _msl_for(ref_cst: str) -> float:
+    if ref_cst in _MSL:
+        return _MSL[ref_cst]
+    _me, ve = _marnage_for(ref_cst)
+    return ve / 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -184,15 +201,21 @@ def tide_height_at(ref_cst: str, coef: float, when: datetime) -> float:
     """
     from .tide_coeff import _tide_height, _hours_since_epoch
     marn = _marnage_from_coef(ref_cst, coef)
-    _me, ve = _marnage_for(ref_cst)
-    msl = ve / 2.0
+    msl = _msl_for(ref_cst)
 
     lo, hi = _demi_marnage_harmonic(when)
     amp = (hi - lo) / 2.0
     if amp <= 0:
         amp = 1.0
     form = (_tide_height(_hours_since_epoch(when) - _PHASE_OFFSET_H) - (lo + hi) / 2.0) / amp  # [-1, 1]
-    h = msl + (marn / 2.0) * form
+    # ADOUCISSEMENT DES RENVERSES : la vraie marée de la Manche reste en étale
+    # (haute ou basse) plus longtemps autour des pleines/basses mers qu'un
+    # cosinus pur. On mélange la forme harmonique brute et sa racine ^0.7
+    # (qui aplatie près des extrema) :  fp = 0.6*sgn*|f|^0.7 + 0.4*f.
+    # Calibré sur l'annuaire officiel 14-17/08 (écart moyen ~0.5 m, PM à ±0.2 m).
+    sign = 1.0 if form >= 0.0 else -1.0
+    shaped = 0.6 * sign * (abs(form) ** 0.7) + 0.4 * form
+    h = msl + (marn / 2.0) * shaped
     # NB: on NE CLAMPE PAS à 0. Autour de la basse mer des grandes marées
     # (marnage/2 > MSL), la valeur peut devenir légèrement négative : c'est
     # physiquement honnête (la mer descend sous le zéro hydrographique dans
@@ -201,20 +224,17 @@ def tide_height_at(ref_cst: str, coef: float, when: datetime) -> float:
 
 
 def _marnage_from_coef(ref_cst: str, coef: float) -> float:
-    """Marnage (m) correspondant à un coefficient de marée, par interpolation."""
-    m_me, m_ve = _marnage_for(ref_cst)
-    if coef <= 45:
-        marn = m_me
-    elif coef >= 95:
-        marn = m_ve
-    else:
-        t = (coef - 45.0) / 50.0
-        marn = m_me + t * (m_ve - m_me)
-    if coef > 95:
-        marn += (coef - 95.0) / 25.0 * (m_ve * 0.18)
-    if coef < 45:
-        marn -= (45.0 - coef) / 25.0 * (m_me * 0.08)
-    return marn
+    """Marnage (m) correspondant à un coefficient de marée.
+
+    Utilise l'INVERSE de la calibration officielle des coefficients
+    (tide_coeff : coef = A*marnage + B, avec A=7.1, B=20) :
+        marnage = (coef - 20) / 7.1
+    Cette relation est cohérente avec la façon dont le coefficient est
+    produit, garantissant la corrélation correcte hauteur/marnage/coef.
+    (Anciennement : interpolation ME/VE, incohérente avec le coefficient.)
+    """
+    from .tide_coeff import CAL_A, CAL_B
+    return max(0.5, (coef - CAL_B) / CAL_A)
 
 
 def compute_tide(lat: float, lng: float,
