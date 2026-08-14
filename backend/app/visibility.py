@@ -347,9 +347,19 @@ def estimate_visibility(p: OceanParams, water_offset_m: float = 0.0) -> Visibili
     water_offset_m = hauteur d'eau H(t) (marée) au point GPS, en mètres.
     Utile pour l'explication (dilution/effet de profondeur).
     """
+    # --- profondeur d'eau RÉELLE à l'instant t (raffinement v5) ---
+    # depth_chart_m est la profondeur carte (négatif, zéro hydrographique).
+    # La profondeur d'eau réelle présente à la verticale du spot = |ZH| + h(t)
+    # (hauteur de marée). C'est CETTE profondeur qui détermine si l'orbite des
+    # vagues atteint le fond et si les sédiments sont remis en suspension.
+    # À marée basse (h(t) petit) l'eau peu profonde est plus sensible à la
+    # houle qu'à marée haute (h(t) grand) sur le même fond.
+    base_depth = abs(p.depth_chart_m) if p.depth_chart_m is not None else 6.0
+    real_depth = base_depth + max(water_offset_m, 0.0)
+
     # --- sous-cotes individuelles ---
-    r_wave = component_wave(p.swell_height, p.swell_period,
-                            depth_m=p.depth_chart_m)
+    # La houle brasse différemment selon la profondeur d'eau réelle présente.
+    r_wave = component_wave(p.swell_height, p.swell_period, depth_m=real_depth)
     r_wind = component_wind(p.wind_wave_height, p.wind_speed)
     r_wind_dir = component_wind_direction(p.wind_direction_deg,
                                           p.ocean_sector_deg)
@@ -362,12 +372,11 @@ def estimate_visibility(p: OceanParams, water_offset_m: float = 0.0) -> Visibili
     r_inertia = component_inertia(p.past_stirring)
 
     # --- turbidité / SPM (v2) : mesurée par satellite OU estimée par proxy vent+bathy ---
-    depth_eff = p.depth_chart_m if p.depth_chart_m is not None else 6.0
     if p.turbidity_gL is not None:
         spm = p.turbidity_gL
         spm_source = "satellite"
     else:
-        spm = _spm_from_wind_fetch(p.wind_speed, depth_eff, p.sediment_mobility)
+        spm = _spm_from_wind_fetch(p.wind_speed, real_depth, p.sediment_mobility)
         spm_source = "proxy-vent"
     r_turbidity = component_turbidity(spm)
 
@@ -427,7 +436,8 @@ def estimate_visibility(p: OceanParams, water_offset_m: float = 0.0) -> Visibili
             "turbidité": round(r_turbidity, 3),
             "spm_gL": round(spm, 2),
             "spm_source": spm_source,
-            "depth_chart_m": round(depth_eff, 2),
+            "depth_chart_m": round(base_depth, 2),
+            "depth_reelle_m": round(real_depth, 2),
             "hauteur_eau_m": round(water_offset_m, 2),
         },
         explanation=expl,

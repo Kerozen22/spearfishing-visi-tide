@@ -165,3 +165,33 @@ def test_wind_sea_degrades_visi_but_land_neutral():
     assert r_sea.score_m < r_land.score_m
     assert r_sea.factors["vent_de_mer"] < 1.0
     assert r_land.factors["vent_de_mer"] == 1.0
+
+
+# --- v5 : profondeur d'eau réelle (marée haute vs basse) ---
+
+def test_real_depth_uses_tide_and_reduces_wave():
+    """La profondeur d'eau réelle = |ZH| + hauteur de marée est utilisée :
+    par la même houle, un fond ravale (marée basse) brasse plus qu'en pleine
+    eau (marée haute) sur le même spot."""
+    p = _ideal()
+    p.swell_height = 2.0
+    p.depth_chart_m = -4.0   # ZH : 4 m de fond au zéro
+    # Marée basse : il n'y a que ~0.5 m d'eau réelle au-dessus du fond
+    low = estimate_visibility(p, water_offset_m=0.5)
+    # Marée haute : ~6 m d'eau réelle
+    high = estimate_visibility(p, water_offset_m=6.0)
+    assert high.factors["depth_reelle_m"] > low.factors["depth_reelle_m"]
+    # Plus d'eau = l'orbite des vagues touche moins le fond = houle moins pénalisante
+    assert high.factors["houle"] >= low.factors["houle"]
+    # La profondeur réelle est cohérente : |ZH| + marée
+    assert abs(low.factors["depth_reelle_m"] - (4.0 + 0.5)) < 0.01
+    assert abs(high.factors["depth_reelle_m"] - (4.0 + 6.0)) < 0.01
+
+
+def test_ocean_sector_multiregion():
+    """Le secteur océanique (vent de large) est géographique : Manche = NW,
+    Atlantique = Ouest, Méditerranée = Sud."""
+    from app.tide_plus import _ocean_sector_for
+    assert _ocean_sector_for(48.6, -2.19) == 310.0    # Manche / N-Bretagne
+    assert _ocean_sector_for(46.5, -1.8) == 280.0     # Atlantique
+    assert _ocean_sector_for(43.3, 5.37) == 195.0     # Méditerranée

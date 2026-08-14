@@ -34,6 +34,29 @@ OPENMETEO_FORECAST_BASE = "https://api.open-meteo.com/v1/forecast"
 DEFAULT_OCEAN_SECTOR_DEG = 310.0
 
 
+def _ocean_sector_for(lat: float, lng: float) -> float:
+    """Secteur angulaire (degrés) d'où viennent la houle et le vent de large.
+
+    Selon la façade, la mer s'ouvre vers une direction différente :
+      - Manche / Nord Bretagne (lng < ~-1°, lat > ~48.6) : large au NW-Ouest
+        (Manche et Atlantique nord) ~310°.
+      - Atlantique centre/sud (Bretagne Sud, Vendée, Landes) : océan à l'Ouest
+        ~270°.
+      - Méditerranée française : large au Sud / Sud-Ouest ~170-200°.
+    C'est une heuristique géographique robuste (sans données de trait de côte),
+    suffisante pour distinguer un "vent de mer" d'un "vent de terre".
+    Retourne l'azimut auquel le vent est considéré comme venant de la mer.
+    """
+    if lng < -6.2:  # Atlantique pur (Golfe de Gascogne / Atlantique)
+        return 270.0
+    if 4.0 < lng and lat < 44.5:   # Méditerranée française (large au Sud/SO)
+        return 195.0
+    if lat > 48.5 and lng < -1.0:  # Manche / Nord Bretagne
+        return 310.0
+    # Façade Ouest continentale (défaut) : houle de l'Ouest
+    return 280.0
+
+
 async def fetch_marine_data(lat: float, lng: float,
                             when: Optional[datetime] = None
                             ) -> dict:
@@ -269,7 +292,7 @@ async def build_visibility(lat: float, lng: float,
         turbidity_gL=turbidity,
         past_stirring=_past_stirring(marine, when, depth_m),
         wind_direction_deg=await _fetch_wind_direction(lat, lng, when),
-        ocean_sector_deg=DEFAULT_OCEAN_SECTOR_DEG,
+        ocean_sector_deg=_ocean_sector_for(lat, lng),
     )
     return estimate_visibility(params, water_offset_m=offset_h)
 
