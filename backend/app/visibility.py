@@ -60,6 +60,24 @@ WIND_SAT_MS = 16.0
 COEF_LOW = 45.0
 COEF_HIGH = 90.0
 
+# Effet de la hauteur d'eau (marée) sur la visi. Correction physique par
+# rapport à une ancienne formule qui pénalisait la HAUTEUR d'eau (faux) :
+# en réalité, plus l'eau est haute au-dessus d'un fond, plus les sédiments
+# sont dilués et loin de l'orbite des vagues -> visi AMÉLIORÉE (Beer-Lambert :
+# le trajet lumineux s'allège car moins de SPM remis en suspension près du fond).
+# À l'inverse, en fin de descente (peu d'eau sur un haut-fond), la houle
+# atteint le fond et brasse -> visi dégradée.
+# Profondeur d'eau (hors ZH) au-delà de laquelle l'effet est stabilisé.
+WATER_OK_M = 6.0     # hauteur d'eau (m) au-delà de laquelle on considère la couche d'eau stabilisante
+WATER_EFFECT_STR = 0.55   # intensité de l'effet (0 = pas d'effet, 1 = effet fort)
+WATER_MIN_M = 0.8    # en dessous de cette hauteur d'eau, l'effet est max (découvert)
+
+# Profondeur (ZH) pondérant l'impact de la houle sur le fond :
+# Uw ~ H/T / sinh(k.h) : en eau peu profonde l'orbite atteint le fond et
+# resuspend fortement ; sur un tombant profond elle se dissipe avant le fond.
+DEPTH_ALLUVION_MIN = 4.0    # en dessous (haut-fond), plein impact
+DEPTH_ALLUVION_MAX = 25.0   # au-delà (tombant), impact houle fortement réduit
+
 
 # ---------------------------------------------------------------------------
 # Structures
@@ -89,6 +107,9 @@ class OceanParams:
     # Turbidité mesurée par satellite (v2, Copernicus SPM / NASA). Si None,
     # on estime un proxy via le vent + la bathymétrie.
     turbidity_gL: Optional[float] = None  # g/L  (0.5 clair, 10+ vaseux)
+    # Inertie sédimentaire : énergie de remise en suspension des ~12 dernières
+    # heures (index), même si le vent/la houle sont retombés. 0 = pas d'historique.
+    past_stirring: float = 0.0  # 0..1 (1 = fort brassage récent)
 
 
 @dataclass
@@ -130,14 +151,13 @@ def _reduction(p: float, lo: float, hi: float) -> float:
     return 1.0 - (0.5 - 0.5 * math.cos(math.pi * t))
 
 
-def component_wave(storm: float, period: float) -> float:
+def component_wave(storm: float, period: float,
+                   depth_m: Optional[float] = None) -> float:
     """Impact de la houle/agitation sur la remise en suspension.
 
-    Le déclencheur est la vitesse orbitale au fond Uw ~ H / T (approximation
-    en eau peu profonde : u_max ~ pi*H / T / sinh(k h)). Pour simplifier et
-    rester robuste sans la profondeur exacte, on utilise H/T comme proxy de
-    l'energie de remise en suspension, module par la periode (period long =
-    plus d'orbits atteignant le fond).
+    Le déclencheur est la vitesse orbitale au fond Uw ~ H / T / sinh(k h).
+    En eau peu profonde, l'orbite atteint le fond et resuspend fortement ;
+    sur un tombant profond, elle se dissipe avant d'atteindre le fond.
 
     Retour : réduction dans [0,1] de la visibilité due aux vagues.
     """
@@ -152,7 +172,36 @@ def component_wave(storm: float, period: float) -> float:
         peri = 0.6  # clapot court, impact fond reduit
     elif period > PERIOD_LONG:
         peri = 1.3  # grosse houle longue, gros brassage fond
+    # --- Profondeur du fond : amplificateur/réducteur (v2) ---
+    # Uw décroît exponentiellement avec la profondeur (sinh). Sur un haut-fond
+    # (< 4 m) la houle touche le fond à pleine énergie ; sur un tombant
+    # (> 25 m) elle se dissipe. Appliqué en exposant sur le "stirring".
+    depth_att = 1.0
+    if depth_m is not None and depth_m > 0:
+        # profondeur efficace : h respecte la hauteur d'eau présente
+        if depth_m <= DEPTH_ALLUVION_MIN:
+            depth_att = 1.0                      # haut-fond : plein impact
+        elif depth_m >= DEPTH_ALLUVION_MAX:
+            depth_att = 0.30                     # tombant : houle peu efficace
+        else:
+            t = (depth_m - DEPTH_ALLUVION_MIN) / (DEPTH_ALLUVION_MAX - DEPTH_ALLUVION_MIN)
+            depth_att = 1.0 - 0.70 * t           # transition lisse
+        stirring *= depth_att
     return _reduction(stirring, 0.08 * peri, 0.35 * peri)
+
+
+def component_inertia(past_stirring: float) -> float:
+    """Inertie sédimentaire : le brassage passé laisse les sédiments en
+    suspension plusieurs heures après que le vent/la houle sont retombés.
+
+    C'est la "mémoire" du système : même par temps calme, une forte agitation
+    récente (< 12 h) maintient une turbidité résiduelle. past_stirring est un
+    index 0..1 de l'énergie des dernières heures.
+    """
+    if past_stirring <= 0:
+        return 1.0
+    # pénalité progressive : 10% d'impact à faible inertie, 50% à forte.
+    return 1.0 - 0.5 * _clamp(past_stirring, 0.0, 1.0)
 
 
 def component_wind(wind_wave_height: float, wind_speed: float) -> float:
@@ -249,7 +298,8 @@ def estimate_visibility(p: OceanParams, water_offset_m: float = 0.0) -> Visibili
     Utile pour l'explication (dilution/effet de profondeur).
     """
     # --- sous-cotes individuelles ---
-    r_wave = component_wave(p.swell_height, p.swell_period)
+    r_wave = component_wave(p.swell_height, p.swell_period,
+                            depth_m=p.depth_chart_m)
     r_wind = component_wind(p.wind_wave_height, p.wind_speed)
 
     wave_drive = max(p.tidal_current_ms, (p.swell_height / max(p.swell_period, 0.1)))
@@ -257,6 +307,7 @@ def estimate_visibility(p: OceanParams, water_offset_m: float = 0.0) -> Visibili
     r_current = component_current(p.current_speed)
     tide_drive_scalar = _clamp(p.tidal_current_ms * 3.0, 0.0, 1.0)
     r_sediment = component_sediment(p.sediment_mobility, p.current_speed, tide_drive_scalar)
+    r_inertia = component_inertia(p.past_stirring)
 
     # --- turbidité / SPM (v2) : mesurée par satellite OU estimée par proxy vent+bathy ---
     depth_eff = p.depth_chart_m if p.depth_chart_m is not None else 6.0
@@ -269,11 +320,16 @@ def estimate_visibility(p: OceanParams, water_offset_m: float = 0.0) -> Visibili
     r_turbidity = component_turbidity(spm)
 
     # --- produit (modele multiplicatif / Beer-Lambert) ---
-    # On met a l'exposant la hauteur d'eau (plus d'eau au-dessus = plus
-    # d'atténuation cumulée sur le trajet lumineux). Effet léger.
-    water_factor = math.exp(-water_offset_m * 0.02)
-    score = (VISI_MAX_REFERENCE * r_wave * r_wind * r_tide * r_current * r_sediment
-             * r_turbidity * water_factor)
+    # Effet de la hauteur d'eau (marée) : plus d'eau sur un fond = dilution et
+    # moins de remise en suspension près du fond -> visi meilleure. En fin de
+    # descente (peu d'eau sur haut-fond), la houle/Ca brasse -> visi dégradée.
+    # Formule : facteur = exp( -WATER_EFFECT_STR * f(water) ) avec
+    #   f(water) -> 1 quand water bas (mauvais), -> 0 quand water haut (bon).
+    w = max(water_offset_m, 0.0)
+    water_penalty = math.exp(-w / WATER_OK_M)          # 1 quand w=0, ~0 quand w grand
+    water_factor = math.exp(-WATER_EFFECT_STR * water_penalty)
+    score = (VISI_MAX_REFERENCE * r_wave * r_wind * r_tide * r_current
+             * r_sediment * r_inertia * r_turbidity * water_factor)
     score = _clamp(score, VISI_MIN_FLOOR, VISI_MAX_REFERENCE)
 
     # --- qualitatif diffuser ---
@@ -291,7 +347,7 @@ def estimate_visibility(p: OceanParams, water_offset_m: float = 0.0) -> Visibili
     weakest = sorted(
         [("houle", r_wave), ("vent", r_wind), ("marée", r_tide),
          ("courant", r_current), ("fond/sédiment", r_sediment),
-         ("turbidité", r_turbidity)],
+         ("brassage passé", r_inertia), ("turbidité", r_turbidity)],
         key=lambda kv: kv[1],
     )
     for name, r in weakest:
@@ -311,6 +367,7 @@ def estimate_visibility(p: OceanParams, water_offset_m: float = 0.0) -> Visibili
             "marée": round(r_tide, 3),
             "courant": round(r_current, 3),
             "sédiment": round(r_sediment, 3),
+            "brassage_passé": round(r_inertia, 3),
             "turbidité": round(r_turbidity, 3),
             "spm_gL": round(spm, 2),
             "spm_source": spm_source,

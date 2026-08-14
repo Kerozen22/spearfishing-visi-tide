@@ -71,6 +71,52 @@ def _empty_marine() -> dict:
     }}
 
 
+def _past_stirring(data: dict, when: datetime, depth_m: float) -> float:
+    """Index (0..1) d'agitation sédimentaire des ~12 dernières heures.
+
+    Même si le vent est retombé maintenant, un fort vent récent a mis des
+    sédiments en suspension qui mettent plusieurs heures à se redéposer
+    (inertie sédimentaire). On intègre le carré du vent des 12 h précédentes
+    pondéré par une décroissance exponentielle (mémoire ~ 4 h), et on réduit
+    l'effet en eau profonde (les sédiments se redéposent ou sont dilués).
+    """
+    times = data.get("hourly", {}).get("time", [])
+    winds = data.get("hourly", {}).get("wind_speed_10m", [])
+    if not times or not winds:
+        return 0.0
+    target = when
+    total = 0.0
+    weight_sum = 0.0
+    for t, w in zip(times, winds):
+        if w is None:
+            continue
+        try:
+            tt = datetime.fromisoformat(t.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if tt.tzinfo is None:
+            tt = tt.replace(tzinfo=timezone.utc)
+        hours_back = (target - tt).total_seconds() / 3600.0
+        if 0 <= hours_back <= 12.0:
+            wgt = math.exp(-hours_back / 4.0)   # mémoire ~ 4 h
+            total += (float(w) ** 2) * wgt
+            weight_sum += wgt
+    if weight_sum <= 0:
+        return 0.0
+    avg_v2 = total / weight_sum
+    # Normalise : vent 5 m/s -> ~0.1, vent 12 m/s -> ~0.6, vent 18 m/s -> ~1.0
+    idx = math.sqrt(avg_v2) / 18.0
+    # L'eau profonde dilue / l'inertie persiste surtout près du fond.
+    depth_w = 1.0
+    if depth_m and depth_m > 0:
+        depth_w = math.exp(-max(depth_m - 5.0, 0.0) / 12.0)  # réduit au-delà ~17m
+    return _clamp_f(idx * depth_w, 0.0, 1.0)
+
+
+def _clamp_f(v: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, v))
+
+
 def _pick_at_hour(data: dict, when: datetime, field: str) -> float:
     """Extrait la valeur d'un champ horaire Open-Meteo à une heure donnée.
 
@@ -193,6 +239,7 @@ async def build_visibility(lat: float, lng: float,
         sediment_mobility=1.0,
         depth_chart_m=depth_m,
         turbidity_gL=turbidity,
+        past_stirring=_past_stirring(marine, when, depth_m),
     )
     return estimate_visibility(params, water_offset_m=offset_h)
 

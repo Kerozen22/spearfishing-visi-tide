@@ -87,3 +87,52 @@ def test_spm_proxy_increases_with_wind():
     # plus profond = moins de remise en suspension
     deep = _spm_from_wind_fetch(20.0, 30.0, 1.0)
     assert deep < hi
+
+
+# --- Raffinements v3 : profondeur du fond, hauteur d'eau, inertie sédimentaire ---
+
+def test_wave_reduced_on_deep_tombant():
+    """Même houle produit moins de resuspension sur un tombant profond qu'un
+    haut-fond (l'orbite des vagues se dissipe avant d'atteindre le fond)."""
+    p_shallow = _ideal()
+    p_shallow.swell_height = 2.0
+    p_shallow.depth_chart_m = 3.0      # haut-fond
+    p_deep = _ideal()
+    p_deep.swell_height = 2.0
+    p_deep.depth_chart_m = 25.0        # tombant
+    r_shallow = estimate_visibility(p_shallow)
+    r_deep = estimate_visibility(p_deep)
+    assert r_deep.score_m > r_shallow.score_m, (
+        f"Le tombant devrait avoir une meilleure visi que le haut-fond")
+    assert p_shallow.depth_chart_m < p_deep.depth_chart_m
+
+
+def test_water_factor_high_water_better():
+    """Plus d'eau sur un fond dilue les sédiments -> visi meilleure en eau
+    haute qu'en eau basse (correction physique : l'ancien sens pénalisait
+    la pleine mer, ce qui était faux)."""
+    p = _ideal()
+    p.depth_chart_m = 3.0
+    low = estimate_visibility(p, water_offset_m=0.5)      # eau très basse
+    high = estimate_visibility(p, water_offset_m=6.0)     # eau haute
+    assert high.score_m >= low.score_m, (
+        f"Eau haute devrait améliorer (dilution), obtenu low={low.score_m} high={high.score_m}")
+
+
+def test_inertia_penalizes_after_stirring():
+    """L'agitation passée (mémoire sédimentaire) pénalise même si le vent
+    est retombé maintenant."""
+    calm = _ideal()
+    calm_same_but_recent = _ideal()
+    calm_same_but_recent.past_stirring = 0.9
+    r_none = estimate_visibility(calm)
+    r_recent = estimate_visibility(calm_same_but_recent)
+    assert r_recent.score_m < r_none.score_m
+    assert r_none.factors["brassage_passé"] == 1.0
+    assert r_recent.factors["brassage_passé"] < 1.0
+
+
+def test_inertia_zero_no_effect():
+    """Sans historique de brassage, le facteur inertie est neutre (1.0)."""
+    r = estimate_visibility(_ideal())
+    assert r.factors["brassage_passé"] == 1.0
