@@ -136,12 +136,22 @@ def _loc_of_ref(ref_cst: str) -> tuple[float, float]:
 def tide_height_at(ref_cst: str, coef: float, when: datetime) -> float:
     """Hauteur d'eau (m) au-dessus du zéro hydrographique à l'instant t.
 
-    Courbe semi-diurne : hauteur = marnage/2 * (1 - cos(phi)). Vaut 0 à la basse
-    mer, = marnage à la pleine mer. La phase phi dépend de la longitude du port
-    de référence (ondes de marée qui se propagent vers l'ouest sur la façade
-    atlantique).
+    Courbe semi-diurne SINUSOÏDALE CENTRÉE sur le niveau moyen de la mer
+    (MSL) :  h(t) = MSL + (marnage/2) * cos(phi).
+
+    Cette formulation est physiquement correcte ET relie la hauteur au
+    coefficient :
+      - La pleine mer vaut  MSL + marnage/2, la basse mer MSL - marnage/2.
+      - Le marnage (différence PM-BM) est directement dérivé du coefficient :
+        + coefficient = amplitude (marnage) plus grande.
+      - La basse mer n'est JAMAIS faussement écrasée à 0 : plus le
+        coefficient diminue, plus la mer "reste haute" à la BM (cohérent).
+    MSL = niveau moyen de la mer ≈ mi-marnage de vive-eau (VE/2). Ex:
+    Saint-Malo VE=11.8 -> MSL≈5.9 m ; Brest VE=6.0 -> MSL≈3.0 m.
     """
     marn = _marnage_from_coef(ref_cst, coef)
+    _me, ve = _marnage_for(ref_cst)
+    msl = ve / 2.0
 
     # Phase : période M2 = 12.4206012 h. Décalage spatial par longitude.
     P_M2_H = 12.4206012
@@ -153,8 +163,8 @@ def tide_height_at(ref_cst: str, coef: float, when: datetime) -> float:
     # cycle de la baie de Saint-Malo.
     phase_shift = (lon0 + 90.0) * math.pi / 180.0
     phi = t_rad + phase_shift
-    h = (marn / 2.0) * (1.0 - math.cos(phi))
-    return round(h, 2)
+    h = msl + (marn / 2.0) * math.cos(phi)
+    return round(max(0.0, h), 2)
 
 
 def _marnage_from_coef(ref_cst: str, coef: float) -> float:
@@ -184,9 +194,13 @@ def compute_tide(lat: float, lng: float,
     when = when or datetime.now(timezone.utc)
     port = resolve_reference_port(lat, lng)
     ref = port.get("ref") or "SAINT-MALO"
-    # Coefficient harmonique SHOM calibré (vrai coeff quotidien, pas approx).
-    from .tide_coeff import tidal_range_harmonic, coefficient_from_range
-    coef = coefficient_from_range(tidal_range_harmonic(when))
+    # Coefficient harmonique SHOM calibré. On utilise les 2 coefficients
+    # OFFICIELS du jour (matin / soir) pour STABILISER la valeur : les
+    # endpoints spot et timeline affichent un coef constant selon la
+    # demi-journée, au lieu d'un coef instable qui varie d'heure en heure.
+    from .tide_coeff import daily_coefficients
+    c_am, c_pm = daily_coefficients(when)
+    coef = c_am if when.hour < 12 else c_pm
     warp = tide_height_at(ref, coef, when)
     marn = _marnage_from_coef(ref, coef)
     return {

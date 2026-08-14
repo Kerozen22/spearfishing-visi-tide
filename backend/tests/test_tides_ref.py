@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 
 from app.tides_ref import (
     compute_tide, resolve_reference_port, tide_height_at,
-    _coefficient_of_day, _marnage_from_coef,
+    _coefficient_of_day, _marnage_from_coef, _marnage_for,
 )
 
 
@@ -40,16 +40,32 @@ def test_marnage_monotonic_with_coefficient():
 
 
 def test_water_level_within_marnage():
-    """La hauteur d'eau doit rester entre 0 et le marnage sur un cycle."""
+    """La hauteur oscille autour du niveau moyen (MSL) et le marnage observé
+    PM-BM sur la courbe vaut bien le marnage du coefficient.
+
+    Nouvelle physique (corrige la corrélation coef/hauteur) : h(t) = MSL +
+    (marnage/2)*cos(phi). La PM ~ MSL+marnage/2, la BM ~ MSL-marnage/2.
+    Aux coefs moyens la BM n'est PAS écrasée à 0.
+    """
     ref = "SAINT-MALO"
     coef = 75.0
     marn = _marnage_from_coef(ref, coef)
+    _me, ve = _marnage_for(ref)
+    msl = ve / 2.0
     t0 = datetime(2026, 8, 13, 0, 0, tzinfo=timezone.utc)
     heights = [tide_height_at(ref, coef, t0 + timedelta(minutes=m)) for m in range(0, 12 * 60, 15)]
-    assert all(0.0 <= h <= marn + 0.01 for h in heights)
-    # on doit observer à la fois 0 (basse mer) et proche du marnage (pleine mer)
-    assert min(heights) < 0.1
-    assert max(heights) > marn * 0.95
+    # Aucune hauteur négative (jamais sous le zéro hydrographique).
+    assert all(h >= 0.0 for h in heights)
+    # La hauteur reste dans un intervalle ~centré sur MSL, borné par
+    # MSL ± marnage/2 (tolérance d'arrondi).
+    assert all(h <= msl + marn / 2.0 + 0.01 for h in heights)
+    # Le MARNAGE observé (PM - BM sur la courbe) vaut bien celui du coefficient.
+    observed = max(heights) - min(heights)
+    assert abs(observed - marn) < 0.5
+    # La PM atteint bien ~MSL + marnage/2.
+    assert max(heights) > msl + marn / 2.0 - 0.2
+    # Aux coef moyens, la BM reste positive (pas faussement écrasée à 0).
+    assert min(heights) > 0.1
 
 
 def test_compute_tide_shape():
