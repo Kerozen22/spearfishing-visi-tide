@@ -18,7 +18,32 @@ body, #root, .app {
   backdrop-filter: blur(6px);
   box-shadow: 0 4px 20px rgba(0,0,0,.3);
 }
-.top-right { top: 14px; right: 14px; display: flex; align-items: center; gap: 8px; }
+/* HUD visi : à gauche du bouton de géolocalisation (46px + marge) */
+.top-right { top: 14px; right: 70px; display: flex; align-items: center; gap: 8px; }
+
+/* Bouton de géolocalisation : toujours visible en haut à droite de la carte */
+.locate-btn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 25;
+  width: 46px;
+  height: 46px;
+  border: none;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #e2e8f0;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 20px rgba(0,0,0,.35);
+  transition: transform .15s ease, background .15s ease;
+}
+.locate-btn:hover:not(:disabled) { background: rgba(30, 41, 59, 0.95); transform: scale(1.05); }
+.locate-btn:disabled { opacity: .6; cursor: wait; }
+.locate-btn:active:not(:disabled) { transform: scale(.95); }
 
 .dot {
   width: 14px; height: 14px; border-radius: 50%;

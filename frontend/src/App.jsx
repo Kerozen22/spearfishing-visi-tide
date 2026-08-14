@@ -93,6 +93,7 @@ export default function App() {
   const [sliderIdx, setSliderIdx] = useState(null)
   const [dayOffset, setDayOffset] = useState(0)    // 0=aujourd'hui, -1=hier, +1=demain
   const [error, setError] = useState(null)
+  const [locating, setLocating] = useState(false)  // géolocalisation en cours
   const mapRef = useRef(null)
 
   // Charge la timeline 24h pour le SPOT cliqué et le JOUR choisi (dayOffset).
@@ -157,8 +158,8 @@ export default function App() {
     factors: currentPoint.factors || spotData.factors,
   } : spotData
 
-  async function onMapClick(evt) {
-    const { lng, lat } = evt.lngLat
+  // Sélectionne un spot (clic carte OU géolocalisation) et charge sa fiche.
+  async function selectSpot(lat, lng) {
     setSelected({ lat, lng })
     setLoading(true)
     setSpotData(null)
@@ -172,6 +173,45 @@ export default function App() {
     } finally {
       setLoading(false)
     }
+  }
+
+  async function onMapClick(evt) {
+    const { lng, lat } = evt.lngLat
+    await selectSpot(lat, lng)
+  }
+
+  // Géolocalisation : centre la carte sur l'utilisateur et interroge le spot.
+  function onLocate() {
+    if (!navigator.geolocation) {
+      setError("Géolocalisation non supportée par ce navigateur")
+      return
+    }
+    setError(null)
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating(false)
+        const { latitude: lat, longitude: lng } = pos.coords
+        // Centre la carte sur la position (zoom rapproché) puis sélectionne.
+        if (mapRef.current) {
+          mapRef.current.easeTo({
+            center: [lng, lat],
+            zoom: Math.max(viewport.zoom, 14),
+          })
+        } else {
+          setViewport((v) => ({ ...v, longitude: lng, latitude: lat, zoom: 14 }))
+        }
+        selectSpot(lat, lng)
+      },
+      (err) => {
+        setLocating(false)
+        setError(
+          err.code === err.PERMISSION_DENIED
+            ? "Autorisation de géolocalisation refusée"
+            : "Position introuvable")
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
+    )
   }
 
   const displayLabel = currentPoint ? fmtTime(currentPoint.at) : '—'
@@ -227,6 +267,17 @@ export default function App() {
         )}
       </Map>
       </MapBoundary>
+
+      {/* Bouton de géolocalisation : toujours visible en haut à droite */}
+      <button
+        className="locate-btn"
+        onClick={onLocate}
+        title="Me géolocaliser (profondeur à ma position)"
+        aria-label="Me géolocaliser"
+        disabled={locating}
+      >
+        {locating ? '⌛' : '📍'}
+      </button>
 
       {selected && popupView && (
         <div className="hud top-right">
